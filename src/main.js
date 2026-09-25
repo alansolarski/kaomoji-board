@@ -21,6 +21,7 @@ const autoPasteToggle = $("autoPasteToggle");
 const soundToggle = $("soundToggle");
 const autostartToggle = $("autostartToggle");
 const themeSegmented = $("themeSegmented");
+const densitySegmented = $("densitySegmented");
 const hotkeyBtn = $("hotkeyBtn");
 const hotkeyHint = $("hotkeyHint");
 const dataDirHint = $("dataDirHint");
@@ -49,8 +50,8 @@ function el(tag, className, text) {
 
 // ---------- persisted data (data.json via the backend) ----------
 
-const DEFAULT_PREFS = { stayOpen: false, autoPaste: false, sound: true, theme: "auto" };
-let data = { version: 1, favorites: [], custom: [], usage: {}, prefs: { ...DEFAULT_PREFS } };
+const DEFAULT_PREFS = { stayOpen: false, autoPaste: false, sound: true, theme: "auto", density: "comfortable" };
+let data = normalize({});
 let dataLoaded = false;
 
 // Settings used to live in WebView localStorage; carry them over once.
@@ -74,13 +75,37 @@ function readLegacyData() {
 }
 
 function normalize(source) {
+  const usage = source.usage && typeof source.usage === "object" ? source.usage : {};
   return {
     version: 1,
     favorites: Array.isArray(source.favorites) ? source.favorites : [],
     custom: Array.isArray(source.custom) ? source.custom : [],
-    usage: source.usage && typeof source.usage === "object" ? source.usage : {},
+    usage,
     prefs: { ...DEFAULT_PREFS, ...(source.prefs || {}) },
+    stats: normalizeStats(source.stats, usage),
   };
+}
+
+// All-time history for the stats page. Unlike `usage` it never decays or
+// gets pruned. Data from before stats existed is seeded from usage counts.
+function normalizeStats(stats, usage) {
+  if (stats && typeof stats === "object") {
+    return {
+      since: stats.since || Date.now(),
+      first: stats.first || null,
+      counts: stats.counts || {},
+      days: stats.days || {},
+    };
+  }
+  const counts = {};
+  for (const [text, u] of Object.entries(usage)) counts[text] = u.c;
+  return { since: Date.now(), first: null, counts, days: {} };
+}
+
+function dayKey(time = Date.now()) {
+  const d = new Date(time);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 // Called at startup and every time the window opens, so edits made on
@@ -120,17 +145,29 @@ function saveData() {
 function mergeData(mine, theirs) {
   if (!theirs) return mine;
   const union = (a, b) => [...new Set([...a, ...b])];
+  const maxMerge = (a, b) => {
+    const out = { ...a };
+    for (const [k, v] of Object.entries(b)) out[k] = Math.max(out[k] || 0, v);
+    return out;
+  };
   const usage = { ...theirs.usage };
   for (const [text, u] of Object.entries(mine.usage)) {
     const other = usage[text];
     usage[text] = other ? { c: Math.max(u.c, other.c), t: Math.max(u.t, other.t) } : u;
   }
+  const firsts = [mine.stats.first, theirs.stats.first].filter(Boolean);
   return {
     version: 1,
     favorites: union(theirs.favorites, mine.favorites),
     custom: union(theirs.custom, mine.custom),
     usage,
     prefs: { ...mine.prefs },
+    stats: {
+      since: Math.min(mine.stats.since, theirs.stats.since),
+      first: firsts.sort((a, b) => a.t - b.t)[0] || null,
+      counts: maxMerge(theirs.stats.counts, mine.stats.counts),
+      days: maxMerge(theirs.stats.days, mine.stats.days),
+    },
   };
 }
 
@@ -146,8 +183,15 @@ function usageScore(text, now = Date.now()) {
 }
 
 function recordUse(text) {
+  const now = Date.now();
   const prev = data.usage[text] || { c: 0, t: 0 };
-  data.usage[text] = { c: prev.c + 1, t: Date.now() };
+  data.usage[text] = { c: prev.c + 1, t: now };
+
+  const stats = data.stats;
+  stats.counts[text] = (stats.counts[text] || 0) + 1;
+  stats.days[dayKey(now)] = (stats.days[dayKey(now)] || 0) + 1;
+  if (!stats.first) stats.first = { text, t: now };
+
   const keys = Object.keys(data.usage);
   if (keys.length > MAX_USAGE_ENTRIES) {
     const now = Date.now();
@@ -489,6 +533,7 @@ function updateContext() {
 
 function flashContext(message, ms = 1400) {
   clearTimeout(contextTimer);
+  pendingUndo = null;
   contextEl.textContent = message;
   contextTimer = setTimeout(() => {
     contextTimer = null;
@@ -594,27 +639,77 @@ function hideWindow() {
   invoke("hide_window");
 }
 
+function commit() {
+  saveData();
+  render({ keepSelection: true });
+}
+
+// Each undo puts back just the one thing it removed, in its old position,
+// so anything else done in the meantime survives.
 function toggleFavorite(text) {
   const i = data.favorites.indexOf(text);
-  if (i === -1) data.favorites.push(text);
-  else data.favorites.splice(i, 1);
-  saveData();
-  flashContext(i === -1 ? "Added to Favorites" : "Removed from Favorites");
-  render({ keepSelection: true });
+  if (i === -1) {
+    data.favorites.push(text);
+    flashContext("Added to Favorites");
+  } else {
+    data.favorites.splice(i, 1);
+    offerUndo("Removed from Favorites", () => {
+      if (!data.favorites.includes(text)) data.favorites.splice(i, 0, text);
+    });
+  }
+  commit();
 }
 
 function deleteCustom(text) {
-  data.custom = data.custom.filter((t) => t !== text);
-  saveData();
-  flashContext("Deleted");
-  render({ keepSelection: true });
+  const i = data.custom.indexOf(text);
+  if (i === -1) return;
+  data.custom.splice(i, 1);
+  offerUndo("Deleted from Custom", () => {
+    if (!data.custom.includes(text)) data.custom.splice(i, 0, text);
+  });
+  commit();
 }
 
 function forgetUsage(text) {
+  const saved = data.usage[text];
   delete data.usage[text];
-  saveData();
-  flashContext("Removed from Frequently Used");
-  render({ keepSelection: true });
+  offerUndo("Removed from Frequently Used", () => {
+    if (saved && !data.usage[text]) data.usage[text] = saved;
+  });
+  commit();
+}
+
+// ---------- undo ----------
+
+const UNDO_MS = 6000;
+let pendingUndo = null;
+
+function offerUndo(message, restore) {
+  clearTimeout(contextTimer);
+  pendingUndo = restore;
+  contextEl.textContent = "";
+  const btn = el("button", "undo-btn", "Undo");
+  btn.addEventListener("click", runUndo);
+  contextEl.append(el("span", "", message), btn, el("kbd", "", "Ctrl"), el("kbd", "", "Z"));
+  // Reuses the context timer so selection changes don't overwrite the offer.
+  contextTimer = setTimeout(clearUndo, UNDO_MS);
+}
+
+function clearUndo() {
+  pendingUndo = null;
+  clearTimeout(contextTimer);
+  contextTimer = null;
+  updateContext();
+}
+
+function runUndo() {
+  const restore = pendingUndo;
+  if (!restore) return false;
+  clearUndo();
+  restore();
+  commit();
+  flashContext("Restored");
+  return true;
 }
 
 // ---------- popover (actions + category picker) ----------
@@ -728,7 +823,7 @@ function openActions(place = "actions") {
     { label: isFav ? "Remove from Favorites" : "Add to Favorites", keys: ["Ctrl", "D"], run: () => toggleFavorite(text) },
   ];
   if (tile.dataset.kind === "frequent") items.push({ label: "Remove from Frequently Used", run: () => forgetUsage(text) });
-  items.push("sep", { label: "Add Custom Kaomoji…", run: startAddingCustom });
+  items.push("sep", { label: "Add Custom Kaomoji…", run: startAddingCustom }, { label: "Your Stats…", run: openStats });
   if (tile.dataset.kind === "custom") items.push({ label: "Delete", danger: true, run: () => deleteCustom(text) });
   openPopover("actions", items, place);
 }
@@ -761,6 +856,13 @@ contentEl.addEventListener("wheel", () => popoverKind === "actions" && closePopo
 // ---------- keyboard ----------
 
 document.addEventListener("keydown", (e) => {
+  if (!statsPanel.hidden) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeStats();
+    }
+    return;
+  }
   if (!settingsPanel.hidden) {
     if (recordingHotkey) {
       handleHotkeyRecording(e);
@@ -798,6 +900,12 @@ document.addEventListener("keydown", (e) => {
   if (ctrl && e.key === "Enter") {
     e.preventDefault();
     runSecondary(selected);
+    return;
+  }
+  // Only while an undo is on offer; otherwise Ctrl+Z stays text undo in search.
+  if (ctrl && key === "z" && pendingUndo) {
+    e.preventDefault();
+    runUndo();
     return;
   }
   if (ctrl && key === "d") {
@@ -869,6 +977,119 @@ document.addEventListener("contextmenu", (e) => {
   if (!e.target.closest("input")) e.preventDefault();
 });
 
+// ---------- stats ----------
+
+const statsBtn = $("statsBtn");
+const statsPanel = $("statsPanel");
+const statsBackBtn = $("statsBackBtn");
+const statsBody = $("statsBody");
+
+const formatDate = (time) =>
+  new Date(time).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+function streaks(days) {
+  const active = new Set(Object.keys(days).filter((d) => days[d] > 0));
+  const shift = (key, delta) => {
+    const [y, m, d] = key.split("-").map(Number);
+    return dayKey(new Date(y, m - 1, d + delta).getTime());
+  };
+  // A streak is still alive if you haven't copied anything yet today.
+  let day = active.has(dayKey()) ? dayKey() : shift(dayKey(), -1);
+  let current = 0;
+  while (active.has(day)) {
+    current++;
+    day = shift(day, -1);
+  }
+  let longest = 0;
+  for (const start of active) {
+    if (active.has(shift(start, -1))) continue; // not the start of a run
+    let len = 0;
+    for (let d = start; active.has(d); d = shift(d, 1)) len++;
+    longest = Math.max(longest, len);
+  }
+  return { current, longest, activeDays: active.size };
+}
+
+function renderStats() {
+  const { counts, days, since, first } = data.stats;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  statsBody.innerHTML = "";
+
+  if (!total) {
+    statsBody.append(el("div", "stats-empty", "Nothing yet ( ˘ω˘ ) Copy some kaomoji and check back!"));
+    return;
+  }
+
+  const hero = el("div", "stats-hero");
+  hero.append(el("span", "big", total.toLocaleString()), el("span", "sub", `kaomoji copied since ${formatDate(since)}`));
+  statsBody.append(hero);
+
+  const { current, longest, activeDays } = streaks(days);
+  const cards = el("div", "stat-cards");
+  for (const [value, label] of [
+    [current, "day streak"],
+    [longest, "longest streak"],
+    [activeDays, activeDays === 1 ? "active day" : "active days"],
+  ]) {
+    const card = el("div", "stat-card");
+    card.append(el("div", "value", String(value)), el("div", "label", label));
+    cards.append(card);
+  }
+  statsBody.append(cards);
+
+  statsBody.append(el("div", "stats-section-title", "Most used"));
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const maxCount = top[0][1];
+  top.forEach(([text, count], i) => {
+    const row = el("button", "top-row");
+    row.title = `Copy ${text}`;
+    const bar = el("span", "top-bar");
+    const fill = el("span");
+    fill.style.width = `${Math.max(4, (count / maxCount) * 100)}%`;
+    bar.append(fill);
+    row.append(el("span", "top-rank", String(i + 1)), el("span", "top-kaomoji kaomoji-font", text), bar, el("span", "top-count", `×${count}`));
+    row.addEventListener("click", () => useKaomoji(text, null, data.prefs.autoPaste ? "paste" : "copy"));
+    statsBody.append(row);
+  });
+
+  const lines = [];
+  const byCategory = new Map();
+  for (const [text, count] of Object.entries(counts)) {
+    const cat = categories.find((c) => c.items.includes(text))?.name ?? (data.custom.includes(text) ? "Custom" : null);
+    if (cat) byCategory.set(cat, (byCategory.get(cat) || 0) + count);
+  }
+  const favCat = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (favCat) lines.push(["Favorite category", `${favCat[0]} (${favCat[1]})`]);
+  const busiest = Object.entries(days).sort((a, b) => b[1] - a[1])[0];
+  if (busiest) {
+    const [y, m, d] = busiest[0].split("-").map(Number);
+    lines.push(["Busiest day", `${formatDate(new Date(y, m - 1, d))} (${busiest[1]})`]);
+  }
+  if (first) lines.push(["First kaomoji", `${first.text}  ·  ${formatDate(first.t)}`]);
+
+  statsBody.append(el("div", "stats-section-title", "Fun facts"));
+  for (const [label, value] of lines) {
+    const line = el("div", "stat-line");
+    line.append(el("span", "", label), el("span", "value kaomoji-font", value));
+    statsBody.append(line);
+  }
+}
+
+function openStats() {
+  closePopover();
+  renderStats();
+  statsBody.scrollTop = 0;
+  statsPanel.hidden = false;
+}
+
+function closeStats() {
+  statsPanel.hidden = true;
+  searchEl.focus();
+}
+
+statsBtn.addEventListener("click", openStats);
+statsBackBtn.addEventListener("click", closeStats);
+
 // ---------- settings ----------
 
 let recordingHotkey = false;
@@ -881,13 +1102,31 @@ function applyTheme(theme) {
   }
 }
 
+function applyDensity(density) {
+  document.documentElement.setAttribute("data-density", density);
+  for (const btn of densitySegmented.children) {
+    btn.classList.toggle("active", btn.dataset.density === density);
+  }
+}
+
 function applyPrefs() {
   stayOpenToggle.checked = data.prefs.stayOpen;
   autoPasteToggle.checked = data.prefs.autoPaste;
   soundToggle.checked = data.prefs.sound;
   applyTheme(data.prefs.theme);
+  applyDensity(data.prefs.density);
   updatePrimaryLabel();
 }
+
+densitySegmented.addEventListener("click", (e) => {
+  const btn = e.target.closest(".seg-btn");
+  if (!btn) return;
+  data.prefs.density = btn.dataset.density;
+  applyDensity(data.prefs.density);
+  saveData();
+  // Which kaomoji need two cells depends on the tile size.
+  render({ keepSelection: true });
+});
 
 function bindPref(toggle, key) {
   toggle.addEventListener("change", () => {
@@ -1054,7 +1293,9 @@ async function handleHotkeyRecording(e) {
 
 async function onShown() {
   if (!settingsPanel.hidden) closeSettings();
+  statsPanel.hidden = true;
   closePopover();
+  if (pendingUndo) clearUndo();
   addingCustom = false;
   searchEl.value = "";
   setTimeout(() => searchEl.focus(), 0);

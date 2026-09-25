@@ -23,6 +23,11 @@
             <path d="M4.5 6.5 8 10l3.5-3.5" />
           </svg>
         </button>
+        <button class="icon-btn" id="statsBtn" title="Your stats" aria-label="Your stats">
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <path d="M3 13V9M8 13V3M13 13V6" />
+          </svg>
+        </button>
         <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
             <path d="M2 4.5h6.5M12.5 4.5H14M2 11.5h1.5M7.5 11.5H14" />
@@ -53,6 +58,18 @@
       </footer>
 
       <div class="popover" id="popover" hidden></div>
+
+      <div class="settings-panel" id="statsPanel" hidden>
+        <header class="topbar settings-top">
+          <button class="icon-btn back-btn" id="statsBackBtn" title="Back (Esc)" aria-label="Back">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M13 8H3M7 4 3 8l4 4" />
+            </svg>
+          </button>
+          <span class="settings-title">Your Kaomoji</span>
+        </header>
+        <div class="settings-body" id="statsBody"></div>
+      </div>
 
       <div class="settings-panel" id="settingsPanel" hidden>
         <header class="topbar settings-top">
@@ -101,6 +118,14 @@
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </span>
           </label>
+
+          <div class="setting-row">
+            <span class="setting-text"><span>Tile size</span></span>
+            <div class="segmented" id="densitySegmented">
+              <button data-density="comfortable" class="seg-btn">Comfortable</button>
+              <button data-density="compact" class="seg-btn">Compact</button>
+            </div>
+          </div>
 
           <div class="setting-row">
             <span class="setting-text"><span>Theme</span></span>

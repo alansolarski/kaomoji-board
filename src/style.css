@@ -240,24 +240,45 @@ kbd {
   opacity: 0.75;
 }
 
+/* Tile density; "compact" is a user setting. */
+:root {
+  --cols: 4;
+  --tile-h: 58px;
+  --tile-font: 16px;
+  --tile-pad: 24px;
+  --tile-gap: 8px;
+}
+
+:root[data-density="compact"] {
+  --cols: 5;
+  --tile-h: 42px;
+  --tile-font: 14px;
+  --tile-pad: 18px;
+  --tile-gap: 6px;
+}
+
+.kaomoji-font {
+  font-family: "Segoe UI", "Yu Gothic UI", "Meiryo UI", "Segoe UI Symbol", sans-serif;
+}
+
 .tiles {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(var(--cols), 1fr);
   grid-auto-flow: dense;
-  gap: 8px;
+  gap: var(--tile-gap);
 }
 
 .tile {
   position: relative;
-  height: 58px;
+  height: var(--tile-h);
   min-width: 0;
   /* Clear of the number badge (left) and heart (right). */
-  padding: 0 24px;
+  padding: 0 var(--tile-pad);
   border: 1.5px solid transparent;
   border-radius: 9px;
   background: var(--tile);
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo UI", "Segoe UI Symbol", sans-serif;
-  font-size: 16px;
+  font-size: var(--tile-font);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -347,6 +368,24 @@ kbd {
   color: var(--accent);
 }
 
+:root[data-density="compact"] .tile[data-n]::before {
+  top: 2px;
+  left: 5px;
+  font-size: 9px;
+}
+
+:root[data-density="compact"] .heart {
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+}
+
+:root[data-density="compact"] .heart svg {
+  width: 11px;
+  height: 11px;
+}
+
 .tile.fav .heart svg {
   fill: currentColor;
 }
@@ -424,6 +463,30 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink-soft);
+}
+
+.context kbd {
+  height: 18px;
+  min-width: 18px;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
+.undo-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.undo-btn:hover {
+  background: var(--accent);
+  color: var(--surface-solid);
 }
 
 .actionbar-right {
@@ -689,6 +752,129 @@ div.setting-row {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+/* ---------- stats ---------- */
+
+.stats-empty {
+  padding: 60px 20px;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.stats-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 6px 4px;
+}
+
+.stats-hero .big {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.stats-hero .sub {
+  color: var(--ink-soft);
+}
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0 6px;
+}
+
+.stat-card {
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--tile);
+}
+
+.stat-card .value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.stat-card .label {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.stats-section-title {
+  margin: 16px 6px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.top-row {
+  display: grid;
+  grid-template-columns: 16px 170px 1fr 44px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.top-row:hover {
+  background: var(--tile-hover);
+}
+
+.top-rank {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.top-kaomoji {
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  overflow: hidden;
+}
+
+.top-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.top-count {
+  font-size: 12px;
+  color: var(--ink-soft);
+  text-align: right;
+}
+
+.stat-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stat-line:last-child {
+  border-bottom: none;
+}
+
+.stat-line .value {
+  color: var(--ink-soft);
+  text-align: right;
 }
 
 .setting-hint.path {
