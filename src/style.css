@@ -246,7 +246,8 @@ kbd {
   position: relative;
   height: 58px;
   min-width: 0;
-  padding: 0 12px;
+  /* Clear of the number badge (left) and heart (right). */
+  padding: 0 24px;
   border: 1.5px solid transparent;
   border-radius: 9px;
   background: var(--tile);
@@ -301,15 +302,52 @@ kbd {
   color: inherit;
 }
 
-.tile.fav::after {
-  content: "";
+/* Favorite toggle: hidden until hover/selection, always shown (filled)
+   once favorited. The hit area is bigger than the glyph. */
+.heart {
   position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
+  top: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--ink-soft);
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, transform 0.08s ease;
+}
+
+.heart svg {
+  fill: none;
+}
+
+.tile:hover .heart,
+.tile.sel .heart {
+  opacity: 0.7;
+}
+
+.heart:hover {
+  opacity: 1 !important;
+  color: var(--accent);
+  background: var(--tile-hover);
+}
+
+.heart:active {
+  transform: scale(0.85);
+}
+
+.tile.fav .heart {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.tile.fav .heart svg {
+  fill: currentColor;
+}
+
+.tile.flash .heart {
+  color: inherit;
 }
 
 .tile.drop {

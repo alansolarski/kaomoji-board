@@ -32,6 +32,11 @@ const FACE_SAD = "(｡•́︿•̀｡)";
 
 const PALETTE = [1, 2, 3, 4, 5, 6].map((n) => `var(--palette-${n})`);
 
+const HEART_SVG =
+  '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">' +
+  '<path d="M8 13.6 2.6 8.4A3.2 3.2 0 0 1 7.1 3.9L8 4.8l.9-.9a3.2 3.2 0 0 1 4.5 4.5Z" ' +
+  'stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -296,7 +301,19 @@ function buildTile(text, sec, indexInSection, favorites) {
   tile.dataset.section = sec.id;
   tile.dataset.sectionLabel = sec.kind === "results" ? "Search Results" : sec.label;
   tile.dataset.kind = sec.kind;
-  if (sec.kind !== "favorites" && favorites.has(text)) tile.classList.add("fav");
+  const isFav = favorites.has(text);
+  if (isFav) tile.classList.add("fav");
+
+  // A span, not a nested button (invalid inside <button>). Stopping the
+  // click here keeps it from reaching the tile's copy handler.
+  const heart = el("span", "heart");
+  heart.title = isFav ? "Remove from Favorites (Ctrl+D)" : "Add to Favorites (Ctrl+D)";
+  heart.innerHTML = HEART_SVG;
+  heart.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFavorite(text);
+  });
+  tile.append(heart);
 
   const flatIndex = flat.length;
   flat.push(tile);
