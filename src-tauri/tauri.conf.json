@@ -12,9 +12,10 @@
       {
         "label": "main",
         "url": "index.html",
-        "title": "( ˘ω˘ )",
-        "width": 360,
-        "height": 480,
+        "title": "kaomoji",
+        "width": 440,
+        "height": 460,
+        "dragDropEnabled": false,
         "resizable": false,
         "decorations": false,
         "transparent": true,

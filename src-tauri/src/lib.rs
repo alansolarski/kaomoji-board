@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager, WebviewWindow,
+    Emitter, Manager, WebviewWindow,
 };
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -45,10 +46,17 @@ struct AppConfig {
 
 struct HotkeyState(Mutex<Shortcut>);
 
-fn config_path(app: &tauri::AppHandle) -> std::path::PathBuf {
+const TRAY_ID: &str = "main";
+const AUTOSTART_FLAG: &str = "--autostart";
+
+fn app_data_file(app: &tauri::AppHandle, name: &str) -> std::path::PathBuf {
     let dir = app.path().app_data_dir().expect("no app data dir");
     let _ = std::fs::create_dir_all(&dir);
-    dir.join("config.json")
+    dir.join(name)
+}
+
+fn config_path(app: &tauri::AppHandle) -> std::path::PathBuf {
+    app_data_file(app, "config.json")
 }
 
 fn load_config(app: &tauri::AppHandle) -> AppConfig {
@@ -116,16 +124,24 @@ fn compute_show_position(window: &WebviewWindow) -> Option<tauri::PhysicalPositi
     Some(tauri::PhysicalPosition::new(cx, cy))
 }
 
+fn show_window(window: &WebviewWindow) {
+    if !window.is_visible().unwrap_or(false) {
+        if let Some(pos) = compute_show_position(window) {
+            let _ = window.set_position(pos);
+        }
+    }
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    // Lets the frontend reset search/selection for a fresh peek.
+    let _ = window.emit("shown", ());
+}
+
 fn toggle_window(window: &WebviewWindow) {
     if window.is_visible().unwrap_or(false) {
         hide_and_save(window);
     } else {
-        if let Some(pos) = compute_show_position(window) {
-            let _ = window.set_position(pos);
-        }
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+        show_window(window);
     }
 }
 
@@ -150,17 +166,77 @@ fn hide_window(window: WebviewWindow) {
     hide_and_save(&window);
 }
 
+/// Copies `text`, hides the board so focus returns to the previous app,
+/// sends Ctrl+V there, then puts the user's previous clipboard text back.
 #[tauri::command]
-fn paste_to_previous(window: WebviewWindow) {
+fn paste_kaomoji(app: tauri::AppHandle, window: WebviewWindow, text: String) -> Result<(), String> {
+    let previous = app.clipboard().read_text().ok();
+    app.clipboard().write_text(text).map_err(|e| e.to_string())?;
     hide_and_save(&window);
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(150));
+
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(120));
         if let Ok(mut enigo) = Enigo::new(&EnigoSettings::default()) {
             let _ = enigo.key(Key::Control, Direction::Press);
             let _ = enigo.key(Key::Unicode('v'), Direction::Click);
             let _ = enigo.key(Key::Control, Direction::Release);
         }
+        // Some apps read the clipboard asynchronously after Ctrl+V, so give
+        // them a moment before restoring.
+        if let Some(previous) = previous {
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            let _ = app.clipboard().write_text(previous);
+        }
     });
+    Ok(())
+}
+
+/// User data (favorites, custom kaomoji, usage, prefs) lives in data.json
+/// next to config.json, not in WebView storage. The frontend owns the schema.
+/// Ok(None) means no file yet; Err means it exists but couldn't be read, so
+/// the frontend must not overwrite it.
+#[tauri::command]
+fn load_data(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
+    let path = app_data_file(&app, "data.json");
+    match std::fs::read_to_string(&path) {
+        Ok(s) => serde_json::from_str(&s)
+            .map(Some)
+            .map_err(|e| format!("data.json is unreadable: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn save_data(app: tauri::AppHandle, data: serde_json::Value) -> Result<(), String> {
+    let path = app_data_file(&app, "data.json");
+    let tmp = path.with_extension("json.tmp");
+    let s = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, s).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+/// Unregisters the global hotkey while the settings panel records a new one,
+/// so pressing the current combo doesn't toggle the window mid-recording.
+#[tauri::command]
+fn pause_hotkey(app: tauri::AppHandle, state: tauri::State<HotkeyState>) {
+    if let Ok(current) = state.0.lock() {
+        let _ = app.global_shortcut().unregister(*current);
+    }
+}
+
+#[tauri::command]
+fn resume_hotkey(app: tauri::AppHandle, state: tauri::State<HotkeyState>) {
+    if let Ok(current) = state.0.lock() {
+        // Errors if it's still registered, which is fine.
+        let _ = app.global_shortcut().register(*current);
+    }
+}
+
+fn update_tray_tooltip(app: &tauri::AppHandle, label: &str) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(format!("kaomoji board  ·  {label}")));
+    }
 }
 
 #[tauri::command]
@@ -196,12 +272,14 @@ fn set_hotkey(
     let shortcuts = app.global_shortcut();
 
     let _ = shortcuts.unregister(*current);
-    shortcuts
-        .register(new_shortcut)
-        .map_err(|e| format!("could not register that combo: {e}"))?;
+    if let Err(e) = shortcuts.register(new_shortcut) {
+        let _ = shortcuts.register(*current);
+        return Err(format!("could not register that combo: {e}"));
+    }
     *current = new_shortcut;
     drop(current);
 
+    update_tray_tooltip(&app, &hotkey.label);
     let mut cfg = load_config(&app);
     cfg.hotkey = hotkey;
     save_config(&app, &cfg);
@@ -211,10 +289,17 @@ fn set_hotkey(
 
 pub fn run() {
     tauri::Builder::default()
+        // Must be first: a second launch (e.g. Start Menu while autostart
+        // already has one running) just surfaces the existing board.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                show_window(&window);
+            }
+        }))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![AUTOSTART_FLAG]),
         ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -234,10 +319,14 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             hide_window,
-            paste_to_previous,
+            paste_kaomoji,
+            load_data,
+            save_data,
             get_settings,
             set_autostart,
-            set_hotkey
+            set_hotkey,
+            pause_hotkey,
+            resume_hotkey
         ])
         .setup(|app| {
             let handle = app.handle();
@@ -256,7 +345,7 @@ pub fn run() {
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip(format!("kaomoji board  ·  {}", cfg.hotkey.label))
                 .menu(&menu)
@@ -264,13 +353,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
-                            if !window.is_visible().unwrap_or(false) {
-                                if let Some(pos) = compute_show_position(&window) {
-                                    let _ = window.set_position(pos);
-                                }
-                            }
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                            show_window(&window);
                         }
                     }
                     "quit" => {
@@ -296,6 +379,12 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 if let (Some(x), Some(y)) = (cfg.window_x, cfg.window_y) {
                     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+                }
+
+                // Stay hidden in the tray at login; show the board when the
+                // user launches it themselves.
+                if !std::env::args().any(|a| a == AUTOSTART_FLAG) {
+                    show_window(&window);
                 }
 
                 let window_clone = window.clone();

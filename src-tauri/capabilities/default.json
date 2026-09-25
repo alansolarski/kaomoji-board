@@ -4,10 +4,7 @@
   "description": "Capabilities for the main kaomoji board window",
   "windows": ["main"],
   "permissions": [
-    "core:window:allow-hide",
-    "core:window:allow-show",
-    "core:window:allow-close",
-    "core:window:allow-set-focus",
+    "core:event:default",
     "clipboard-manager:allow-write-text"
   ]
 }

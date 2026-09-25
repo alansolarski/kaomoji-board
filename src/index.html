@@ -2,39 +2,45 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>kaomoji board</title>
+    <title>kaomoji</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <div class="app" id="app">
-      <header class="titlebar" id="titlebar">
-        <span class="title">( ˘ω˘ ) kaomoji</span>
-        <div class="titlebar-actions">
-          <button class="icon-btn" id="muteBtn" title="Mute copy sound">🔊</button>
-          <button class="icon-btn" id="settingsBtn" title="Settings">⚙</button>
-        </div>
-      </header>
-
-      <div class="search-row">
+      <header class="topbar">
+        <span class="face" id="face" title="drag to move">( ˘ω˘ )</span>
         <input
           id="search"
           class="search"
           type="text"
-          placeholder="search kaomoji... (try 'cry' or 'shrug')"
+          placeholder="search kaomoji…"
           autocomplete="off"
           spellcheck="false"
         />
+        <button class="icon-btn" id="settingsBtn" title="settings" aria-label="settings">
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <path d="M2 4.5h6.5M12.5 4.5H14M2 11.5h1.5M7.5 11.5H14" />
+            <circle cx="10.5" cy="4.5" r="1.75" />
+            <circle cx="5.5" cy="11.5" r="1.75" />
+          </svg>
+        </button>
+      </header>
+
+      <div class="body">
+        <nav class="rail" id="rail"></nav>
+        <main class="content" id="content"></main>
       </div>
 
-      <nav class="tabs" id="tabs"></nav>
+      <footer class="statusbar">
+        <span id="status"></span>
+        <span id="hotkeyLabel"></span>
+      </footer>
 
-      <main class="grid" id="grid"></main>
-
-      <div class="toast" id="toast">copied!</div>
+      <div class="menu" id="menu" hidden></div>
 
       <div class="settings-panel" id="settingsPanel" hidden>
         <div class="settings-header">
-          <button class="icon-btn" id="settingsBackBtn" title="Back">←</button>
+          <button class="icon-btn" id="settingsBackBtn" title="back (esc)" aria-label="back">←</button>
           <span class="settings-title">settings</span>
         </div>
 
@@ -47,16 +53,27 @@
             </span>
           </label>
 
+          <div>
+            <label class="setting-row">
+              <span>auto-paste into last app</span>
+              <span class="toggle">
+                <input type="checkbox" id="autoPasteToggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </span>
+            </label>
+            <p class="setting-hint">pastes straight into the app you were using, then restores your clipboard</p>
+          </div>
+
           <label class="setting-row">
-            <span>auto-paste into last app</span>
+            <span>copy sound</span>
             <span class="toggle">
-              <input type="checkbox" id="autoPasteToggle" />
+              <input type="checkbox" id="soundToggle" />
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </span>
           </label>
 
           <label class="setting-row">
-            <span>launch at Windows startup</span>
+            <span>launch at startup</span>
             <span class="toggle">
               <input type="checkbox" id="autostartToggle" />
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -72,11 +89,13 @@
             </div>
           </div>
 
-          <div class="setting-row">
-            <span>global hotkey</span>
-            <button class="hotkey-btn" id="hotkeyBtn">Ctrl+Alt+K</button>
+          <div>
+            <div class="setting-row">
+              <span>global hotkey</span>
+              <button class="hotkey-btn" id="hotkeyBtn">…</button>
+            </div>
+            <p class="setting-hint" id="hotkeyHint"></p>
           </div>
-          <p class="setting-hint" id="hotkeyHint"></p>
         </div>
       </div>
     </div>
