@@ -471,19 +471,41 @@ actionsBtn.addEventListener("click", () => (popoverKind === "actions" ? closePop
 let audioCtx = null;
 let faceTimer = null;
 
+// A soft rising two-note chime (B5 → E6). Each note has a quick upward
+// chirp for a bit of "pop" and a faint octave overtone for a glassy ring.
+// Takes any audio context so it can also be rendered offline.
+export function synthCopySound(ctx, destination, t0 = ctx.currentTime) {
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 5000;
+  filter.connect(destination);
+
+  const note = (freq, start, dur, peak) => {
+    for (const [mult, level, len] of [[1, 1, dur], [2, 0.18, dur * 0.55]]) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const t = t0 + start;
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq * mult * 0.94, t);
+      osc.frequency.exponentialRampToValueAtTime(freq * mult, t + 0.03);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak * level, t + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      osc.connect(gain).connect(filter);
+      osc.start(t);
+      osc.stop(t + len + 0.02);
+    }
+  };
+  note(987.77, 0, 0.18, 0.07);
+  note(1318.51, 0.07, 0.26, 0.055);
+}
+
 function playCopySound() {
   if (!data.prefs.sound) return;
   try {
     audioCtx = audioCtx || new AudioContext();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.12);
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.12);
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    synthCopySound(audioCtx, audioCtx.destination);
   } catch {
     // no audio device; not worth surfacing
   }
