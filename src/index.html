@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>kaomoji board</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="titlebar" id="titlebar">
+        <span class="title">( ˘ω˘ ) kaomoji</span>
+        <div class="titlebar-actions">
+          <button class="icon-btn" id="muteBtn" title="Mute copy sound">🔊</button>
+          <button class="icon-btn" id="settingsBtn" title="Settings">⚙</button>
+        </div>
+      </header>
+
+      <div class="search-row">
+        <input
+          id="search"
+          class="search"
+          type="text"
+          placeholder="search kaomoji... (try 'cry' or 'shrug')"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+
+      <nav class="tabs" id="tabs"></nav>
+
+      <main class="grid" id="grid"></main>
+
+      <div class="toast" id="toast">copied!</div>
+
+      <div class="settings-panel" id="settingsPanel" hidden>
+        <div class="settings-header">
+          <button class="icon-btn" id="settingsBackBtn" title="Back">←</button>
+          <span class="settings-title">settings</span>
+        </div>
+
+        <div class="settings-body">
+          <label class="setting-row">
+            <span>stay open after copying</span>
+            <span class="toggle">
+              <input type="checkbox" id="stayOpenToggle" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </span>
+          </label>
+
+          <label class="setting-row">
+            <span>auto-paste into last app</span>
+            <span class="toggle">
+              <input type="checkbox" id="autoPasteToggle" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </span>
+          </label>
+
+          <label class="setting-row">
+            <span>launch at Windows startup</span>
+            <span class="toggle">
+              <input type="checkbox" id="autostartToggle" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </span>
+          </label>
+
+          <div class="setting-row">
+            <span>theme</span>
+            <div class="segmented" id="themeSegmented">
+              <button data-theme="auto" class="seg-btn">auto</button>
+              <button data-theme="light" class="seg-btn">light</button>
+              <button data-theme="dark" class="seg-btn">dark</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <span>global hotkey</span>
+            <button class="hotkey-btn" id="hotkeyBtn">Ctrl+Alt+K</button>
+          </div>
+          <p class="setting-hint" id="hotkeyHint"></p>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
