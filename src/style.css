@@ -209,11 +209,13 @@ kbd {
   padding: 2px 14px 14px;
 }
 
-.content::-webkit-scrollbar {
+.content::-webkit-scrollbar,
+.settings-body::-webkit-scrollbar {
   width: 8px;
 }
 
-.content::-webkit-scrollbar-thumb {
+.content::-webkit-scrollbar-thumb,
+.settings-body::-webkit-scrollbar-thumb {
   background: var(--line);
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -684,6 +686,36 @@ div.setting-row {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.setting-hint.path {
+  word-break: break-all;
+}
+
+.row-buttons {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.small-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--tile);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.small-btn:hover {
+  background: var(--tile-hover);
+}
+
+.small-btn[hidden] {
+  display: none;
 }
 
 .hotkey-btn.recording {

@@ -23,6 +23,9 @@ const autostartToggle = $("autostartToggle");
 const themeSegmented = $("themeSegmented");
 const hotkeyBtn = $("hotkeyBtn");
 const hotkeyHint = $("hotkeyHint");
+const dataDirHint = $("dataDirHint");
+const dataDirBtn = $("dataDirBtn");
+const dataDirResetBtn = $("dataDirResetBtn");
 
 const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
 
@@ -70,31 +73,65 @@ function readLegacyData() {
   }
 }
 
-async function loadData() {
-  let stored;
-  try {
-    stored = await invoke("load_data");
-  } catch (err) {
-    // Leave the file alone; running on defaults beats clobbering it.
-    console.error("couldn't load data.json", err);
-    flashContext("Couldn't load your saved kaomoji", 4000);
-    return;
-  }
-  dataLoaded = true;
-  const source = stored ?? readLegacyData() ?? {};
-  data = {
+function normalize(source) {
+  return {
     version: 1,
     favorites: Array.isArray(source.favorites) ? source.favorites : [],
     custom: Array.isArray(source.custom) ? source.custom : [],
     usage: source.usage && typeof source.usage === "object" ? source.usage : {},
     prefs: { ...DEFAULT_PREFS, ...(source.prefs || {}) },
   };
+}
+
+// Called at startup and every time the window opens, so edits made on
+// another computer (via a synced folder) show up on the next peek.
+async function loadData({ initial = false } = {}) {
+  let stored;
+  try {
+    stored = await invoke("load_data");
+  } catch (err) {
+    // Leave the file alone; running on what we have beats clobbering it.
+    console.error("couldn't load data.json", err);
+    flashContext(String(err), 4000);
+    return;
+  }
+  if (stored) {
+    data = normalize(stored);
+  } else if (initial) {
+    data = normalize(readLegacyData() ?? {});
+  }
+  dataLoaded = true;
+  // No file yet (first run, or it was deleted): write out what we have.
   if (!stored) saveData();
 }
 
 function saveData() {
   if (!dataLoaded) return;
-  invoke("save_data", { data }).catch((err) => console.error("couldn't save data.json", err));
+  invoke("save_data", { data }).catch((err) => {
+    console.error("couldn't save data.json", err);
+    flashContext(String(err), 4000);
+  });
+}
+
+// Combines this app's data with data found in a newly chosen folder, so
+// pointing a second computer at the same folder loses nothing: lists are
+// unioned (the folder's order first) and usage keeps the higher count and
+// the latest time. This computer's preferences win.
+function mergeData(mine, theirs) {
+  if (!theirs) return mine;
+  const union = (a, b) => [...new Set([...a, ...b])];
+  const usage = { ...theirs.usage };
+  for (const [text, u] of Object.entries(mine.usage)) {
+    const other = usage[text];
+    usage[text] = other ? { c: Math.max(u.c, other.c), t: Math.max(u.t, other.t) } : u;
+  }
+  return {
+    version: 1,
+    favorites: union(theirs.favorites, mine.favorites),
+    custom: union(theirs.custom, mine.custom),
+    usage,
+    prefs: { ...mine.prefs },
+  };
 }
 
 // ---------- usage ranking ----------
@@ -895,10 +932,48 @@ async function loadBackendSettings() {
     const settings = await invoke("get_settings");
     autostartToggle.checked = Boolean(settings.autostart);
     showHotkeyLabel(settings.hotkey.label);
+    showDataDir(settings.dataDir);
   } catch (err) {
     console.error("couldn't load settings", err);
   }
 }
+
+function showDataDir(dir) {
+  dataDirResetBtn.hidden = !dir;
+  dataDirHint.textContent = dir
+    ? `Synced via ${dir}`
+    : "Only on this PC. Choose a synced folder (like Proton Drive) to share favorites and custom kaomoji between computers.";
+}
+
+async function switchDataDir(dir) {
+  let existing;
+  try {
+    existing = await invoke("set_data_dir", { dir });
+  } catch (err) {
+    dataDirHint.textContent = String(err);
+    return;
+  }
+  data = mergeData(data, existing ? normalize(existing) : null);
+  saveData();
+  applyPrefs();
+  render({ keepSelection: true });
+  showDataDir(dir);
+  const note = existing ? "merged with the data already there" : "your data was copied there";
+  dataDirHint.textContent += ` · ${note}`;
+}
+
+dataDirBtn.addEventListener("click", async () => {
+  let dir;
+  try {
+    dir = await invoke("pick_data_folder");
+  } catch (err) {
+    dataDirHint.textContent = String(err);
+    return;
+  }
+  if (dir) await switchDataDir(dir);
+});
+
+dataDirResetBtn.addEventListener("click", () => switchDataDir(null));
 
 autostartToggle.addEventListener("change", async () => {
   const desired = autostartToggle.checked;
@@ -977,18 +1052,20 @@ async function handleHotkeyRecording(e) {
 
 // ---------- window lifecycle ----------
 
-function onShown() {
+async function onShown() {
   if (!settingsPanel.hidden) closeSettings();
   closePopover();
   addingCustom = false;
   searchEl.value = "";
-  setCategory("all");
   setTimeout(() => searchEl.focus(), 0);
+  await loadData();
+  applyPrefs();
+  setCategory("all");
 }
 
 (async () => {
   window.__TAURI__.event.listen("shown", onShown);
-  await loadData();
+  await loadData({ initial: true });
   applyPrefs();
   setCategory("all");
   loadBackendSettings();

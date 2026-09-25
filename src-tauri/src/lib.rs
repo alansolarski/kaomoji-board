@@ -1,4 +1,6 @@
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings as EnigoSettings};
@@ -10,6 +12,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -42,12 +45,20 @@ struct AppConfig {
     window_y: Option<i32>,
     monitor_x: Option<i32>,
     monitor_y: Option<i32>,
+    /// Folder holding data.json when the user syncs it (e.g. a cloud drive);
+    /// None means the app data dir.
+    data_dir: Option<String>,
 }
 
 struct HotkeyState(Mutex<Shortcut>);
 
 const TRAY_ID: &str = "main";
 const AUTOSTART_FLAG: &str = "--autostart";
+const DATA_FILE: &str = "data.json";
+
+/// Set while a native dialog is open, so losing focus to it doesn't hide
+/// the board (and the dialog with it).
+static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
 
 fn app_data_file(app: &tauri::AppHandle, name: &str) -> std::path::PathBuf {
     let dir = app.path().app_data_dir().expect("no app data dir");
@@ -191,29 +202,89 @@ fn paste_kaomoji(app: tauri::AppHandle, window: WebviewWindow, text: String) -> 
     Ok(())
 }
 
-/// User data (favorites, custom kaomoji, usage, prefs) lives in data.json
-/// next to config.json, not in WebView storage. The frontend owns the schema.
+/// Where data.json lives: the chosen sync folder, or the app data dir.
+/// A sync folder that has gone missing (drive offline, folder deleted) is an
+/// error rather than a silent fallback, so nothing starts over from empty.
+fn data_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    match load_config(app).data_dir {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            if dir.is_dir() {
+                Ok(dir.join(DATA_FILE))
+            } else {
+                Err(format!("Sync folder not found: {}", dir.display()))
+            }
+        }
+        None => Ok(app_data_file(app, DATA_FILE)),
+    }
+}
+
 /// Ok(None) means no file yet; Err means it exists but couldn't be read, so
 /// the frontend must not overwrite it.
-#[tauri::command]
-fn load_data(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
-    let path = app_data_file(&app, "data.json");
-    match std::fs::read_to_string(&path) {
+fn read_data_file(path: &PathBuf) -> Result<Option<serde_json::Value>, String> {
+    match std::fs::read_to_string(path) {
         Ok(s) => serde_json::from_str(&s)
             .map(Some)
-            .map_err(|e| format!("data.json is unreadable: {e}")),
+            .map_err(|e| format!("{} is unreadable: {e}", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.to_string()),
     }
 }
 
+/// User data (favorites, custom kaomoji, usage, prefs) lives in data.json,
+/// not in WebView storage. The frontend owns the schema.
+#[tauri::command]
+fn load_data(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
+    read_data_file(&data_file(&app)?)
+}
+
 #[tauri::command]
 fn save_data(app: tauri::AppHandle, data: serde_json::Value) -> Result<(), String> {
-    let path = app_data_file(&app, "data.json");
+    let path = data_file(&app)?;
     let tmp = path.with_extension("json.tmp");
     let s = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     std::fs::write(&tmp, s).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+/// Opens a folder picker; None if the user cancels. Async so the blocking
+/// dialog runs off the main thread.
+#[tauri::command]
+async fn pick_data_folder(window: WebviewWindow) -> Option<String> {
+    DIALOG_OPEN.store(true, Ordering::SeqCst);
+    let picked = window
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("Choose a folder to keep your kaomoji data in")
+        .blocking_pick_folder();
+    DIALOG_OPEN.store(false, Ordering::SeqCst);
+    picked.and_then(|p| p.into_path().ok()).map(|p| p.display().to_string())
+}
+
+/// Switches where data.json lives (None = back to the app data dir) and
+/// returns whatever data is already there so the frontend can merge it with
+/// what it has, rather than either side overwriting the other.
+#[tauri::command]
+fn set_data_dir(app: tauri::AppHandle, dir: Option<String>) -> Result<Option<serde_json::Value>, String> {
+    let target = match &dir {
+        Some(d) => {
+            let folder = PathBuf::from(d);
+            if !folder.is_dir() {
+                return Err("That folder doesn't exist".into());
+            }
+            let probe = folder.join(".kaomoji-write-test");
+            std::fs::write(&probe, b"ok").map_err(|e| format!("Can't write to that folder: {e}"))?;
+            let _ = std::fs::remove_file(&probe);
+            folder.join(DATA_FILE)
+        }
+        None => app_data_file(&app, DATA_FILE),
+    };
+    let existing = read_data_file(&target)?;
+    let mut cfg = load_config(&app);
+    cfg.data_dir = dir;
+    save_config(&app, &cfg);
+    Ok(existing)
 }
 
 /// Unregisters the global hotkey while the settings panel records a new one,
@@ -243,9 +314,12 @@ fn update_tray_tooltip(app: &tauri::AppHandle, label: &str) {
 fn get_settings(app: tauri::AppHandle) -> serde_json::Value {
     let cfg = load_config(&app);
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    let default_dir = app.path().app_data_dir().map(|p| p.display().to_string()).ok();
     serde_json::json!({
         "hotkey": cfg.hotkey,
         "autostart": autostart_enabled,
+        "dataDir": cfg.data_dir,
+        "defaultDataDir": default_dir,
     })
 }
 
@@ -297,6 +371,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![AUTOSTART_FLAG]),
@@ -322,6 +397,8 @@ pub fn run() {
             paste_kaomoji,
             load_data,
             save_data,
+            pick_data_folder,
+            set_data_dir,
             get_settings,
             set_autostart,
             set_hotkey,
@@ -401,7 +478,9 @@ pub fn run() {
                         let window_clone = window_clone.clone();
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_millis(250));
-                            if !window_clone.is_focused().unwrap_or(false) {
+                            if !window_clone.is_focused().unwrap_or(false)
+                                && !DIALOG_OPEN.load(Ordering::SeqCst)
+                            {
                                 hide_and_save(&window_clone);
                             }
                         });
