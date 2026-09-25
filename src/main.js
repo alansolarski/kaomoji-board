@@ -508,33 +508,33 @@ actionsBtn.addEventListener("click", () => (popoverKind === "actions" ? closePop
 let audioCtx = null;
 let faceTimer = null;
 
-// A soft rising two-note chime (B5 → E6). Each note has a quick upward
-// chirp for a bit of "pop" and a faint octave overtone for a glassy ring.
-// Takes any audio context so it can also be rendered offline.
+// A soft rising two-note chime (E5 → A5): gentle fade-in, a slight upward
+// glide, and only a whisper of octave overtone, filtered to take the edge
+// off. Takes any audio context so it can also be rendered offline.
 export function synthCopySound(ctx, destination, t0 = ctx.currentTime) {
   const filter = ctx.createBiquadFilter();
   filter.type = "lowpass";
-  filter.frequency.value = 5000;
+  filter.frequency.value = 2500;
   filter.connect(destination);
 
   const note = (freq, start, dur, peak) => {
-    for (const [mult, level, len] of [[1, 1, dur], [2, 0.18, dur * 0.55]]) {
+    for (const [mult, level, len] of [[1, 1, dur], [2, 0.06, dur * 0.5]]) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       const t = t0 + start;
       osc.type = "sine";
-      osc.frequency.setValueAtTime(freq * mult * 0.94, t);
-      osc.frequency.exponentialRampToValueAtTime(freq * mult, t + 0.03);
+      osc.frequency.setValueAtTime(freq * mult * 0.97, t);
+      osc.frequency.exponentialRampToValueAtTime(freq * mult, t + 0.04);
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak * level, t + 0.006);
+      gain.gain.exponentialRampToValueAtTime(peak * level, t + 0.015);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + len);
       osc.connect(gain).connect(filter);
       osc.start(t);
       osc.stop(t + len + 0.02);
     }
   };
-  note(987.77, 0, 0.18, 0.07);
-  note(1318.51, 0.07, 0.26, 0.055);
+  note(659.25, 0, 0.2, 0.045);
+  note(880, 0.075, 0.28, 0.036);
 }
 
 function playCopySound() {
