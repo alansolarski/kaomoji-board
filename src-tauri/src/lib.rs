@@ -13,6 +13,7 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -247,6 +248,40 @@ fn save_data(app: tauri::AppHandle, data: serde_json::Value) -> Result<(), Strin
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+struct UpdateInfo {
+    version: String,
+    notes: Option<String>,
+}
+
+/// Asks GitHub releases (see plugins.updater in tauri.conf.json) whether a
+/// newer signed build exists.
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateInfo { version: u.version.clone(), notes: u.body.clone() }))
+}
+
+/// Downloads and verifies the update against the bundled public key, then
+/// runs the installer. On Windows the installer closes and relaunches the app.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Err("Already up to date".into());
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
 /// Opens a folder picker; None if the user cancels. Async so the blocking
 /// dialog runs off the main thread.
 #[tauri::command]
@@ -320,6 +355,7 @@ fn get_settings(app: tauri::AppHandle) -> serde_json::Value {
         "autostart": autostart_enabled,
         "dataDir": cfg.data_dir,
         "defaultDataDir": default_dir,
+        "version": app.package_info().version.to_string(),
     })
 }
 
@@ -372,6 +408,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![AUTOSTART_FLAG]),
@@ -399,6 +436,8 @@ pub fn run() {
             save_data,
             pick_data_folder,
             set_data_dir,
+            check_update,
+            install_update,
             get_settings,
             set_autostart,
             set_hotkey,

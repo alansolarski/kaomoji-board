@@ -24,6 +24,9 @@ const themeSegmented = $("themeSegmented");
 const densitySegmented = $("densitySegmented");
 const hotkeyBtn = $("hotkeyBtn");
 const hotkeyHint = $("hotkeyHint");
+const versionLabel = $("versionLabel");
+const updateHint = $("updateHint");
+const updateBtn = $("updateBtn");
 const dataDirHint = $("dataDirHint");
 const dataDirBtn = $("dataDirBtn");
 const dataDirResetBtn = $("dataDirResetBtn");
@@ -1172,6 +1175,7 @@ async function loadBackendSettings() {
     autostartToggle.checked = Boolean(settings.autostart);
     showHotkeyLabel(settings.hotkey.label);
     showDataDir(settings.dataDir);
+    versionLabel.textContent = `Version ${settings.version}`;
   } catch (err) {
     console.error("couldn't load settings", err);
   }
@@ -1213,6 +1217,47 @@ dataDirBtn.addEventListener("click", async () => {
 });
 
 dataDirResetBtn.addEventListener("click", () => switchDataDir(null));
+
+// ---------- updates ----------
+
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let availableUpdate = null;
+let lastUpdateCheck = 0;
+
+async function checkForUpdate({ manual = false } = {}) {
+  lastUpdateCheck = Date.now();
+  if (manual) updateHint.textContent = "Checking…";
+  try {
+    availableUpdate = await invoke("check_update");
+  } catch (err) {
+    // Background checks stay silent (offline, no release yet, dev build).
+    if (manual) updateHint.textContent = `Couldn't check for updates: ${err}`;
+    return;
+  }
+  settingsBtn.classList.toggle("has-update", Boolean(availableUpdate));
+  if (availableUpdate) {
+    updateHint.textContent = `Version ${availableUpdate.version} is available`;
+    updateBtn.textContent = `Install ${availableUpdate.version}`;
+  } else {
+    updateHint.textContent = manual ? "You're up to date" : "";
+    updateBtn.textContent = "Check for updates";
+  }
+}
+
+updateBtn.addEventListener("click", async () => {
+  if (!availableUpdate) {
+    checkForUpdate({ manual: true });
+    return;
+  }
+  updateBtn.disabled = true;
+  updateHint.textContent = "Downloading… the app restarts when it's done";
+  try {
+    await invoke("install_update");
+  } catch (err) {
+    updateHint.textContent = `Update failed: ${err}`;
+    updateBtn.disabled = false;
+  }
+});
 
 autostartToggle.addEventListener("change", async () => {
   const desired = autostartToggle.checked;
@@ -1302,6 +1347,7 @@ async function onShown() {
   await loadData();
   applyPrefs();
   setCategory("all");
+  if (Date.now() - lastUpdateCheck > UPDATE_CHECK_INTERVAL_MS) checkForUpdate();
 }
 
 (async () => {
@@ -1311,4 +1357,6 @@ async function onShown() {
   setCategory("all");
   loadBackendSettings();
   searchEl.focus();
+  // Let startup settle before touching the network.
+  setTimeout(() => checkForUpdate(), 5000);
 })();
