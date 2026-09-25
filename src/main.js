@@ -1,13 +1,18 @@
 import { categories, searchTags } from "./kaomoji-data.js";
 
 const $ = (id) => document.getElementById(id);
+const appEl = $("app");
 const searchEl = $("search");
-const faceEl = $("face");
-const railEl = $("rail");
 const contentEl = $("content");
-const statusEl = $("status");
-const hotkeyLabelEl = $("hotkeyLabel");
-const menuEl = $("menu");
+const faceEl = $("face");
+const contextEl = $("context");
+const categoryBtn = $("categoryBtn");
+const categoryLabel = $("categoryLabel");
+const categoryDot = $("categoryDot");
+const primaryBtn = $("primaryBtn");
+const primaryLabel = $("primaryLabel");
+const actionsBtn = $("actionsBtn");
+const popoverEl = $("popover");
 const settingsBtn = $("settingsBtn");
 const settingsPanel = $("settingsPanel");
 const settingsBackBtn = $("settingsBackBtn");
@@ -24,7 +29,6 @@ const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
 const FACE_IDLE = "( ˘ω˘ )";
 const FACE_HAPPY = "(ﾉ◕ヮ◕)ﾉ";
 const FACE_SAD = "(｡•́︿•̀｡)";
-const HINT = "↵ copy · ctrl+1-9 · right-click for more";
 
 const PALETTE = [1, 2, 3, 4, 5, 6].map((n) => `var(--palette-${n})`);
 
@@ -68,7 +72,7 @@ async function loadData() {
   } catch (err) {
     // Leave the file alone; running on defaults beats clobbering it.
     console.error("couldn't load data.json", err);
-    setStatus("couldn't load your saved kaomoji", 4000);
+    flashContext("Couldn't load your saved kaomoji", 4000);
     return;
   }
   dataLoaded = true;
@@ -113,11 +117,11 @@ function recordUse(text) {
   saveData();
 }
 
-function recentItems() {
+function frequentItems() {
   const now = Date.now();
   return Object.keys(data.usage)
     .sort((a, b) => usageScore(b, now) - usageScore(a, now))
-    .slice(0, 12);
+    .slice(0, 8);
 }
 
 // ---------- search ----------
@@ -160,11 +164,12 @@ function matchQuality(entry, token) {
   return best;
 }
 
-function search(query) {
+function search(query, within) {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   const now = Date.now();
   const results = [];
   for (const entry of buildIndex()) {
+    if (within && !within.has(entry.text)) continue;
     let total = 0;
     for (const token of tokens) {
       const q = matchQuality(entry, token);
@@ -180,111 +185,141 @@ function search(query) {
   return results.map((r) => r.entry.text);
 }
 
-// ---------- rendering ----------
+// ---------- sections + category filter ----------
 
-let flat = []; // every copyable chip, in visual order
-let selected = -1;
-let addingCustom = false;
+let categoryFilter = "all";
 
-function browseSections() {
+function allSections() {
   const sections = [];
-  const recent = recentItems();
-  if (recent.length) {
-    sections.push({ id: "recent", label: "recent", color: "var(--accent-2)", items: recent, kind: "recent" });
+  const frequent = frequentItems();
+  if (frequent.length) {
+    sections.push({ id: "frequent", label: "Frequently Used", color: "var(--accent)", items: frequent, kind: "frequent" });
   }
-  sections.push({ id: "favorites", label: "favorites", color: "var(--accent)", items: data.favorites, kind: "favorites" });
+  sections.push({ id: "favorites", label: "Favorites", color: "var(--accent)", items: data.favorites, kind: "favorites" });
   categories.forEach((cat, i) => {
     sections.push({ id: `cat-${i}`, label: cat.name, color: PALETTE[i % PALETTE.length], items: cat.items, kind: "category" });
   });
-  sections.push({ id: "custom", label: "custom", color: "var(--palette-6)", items: data.custom, kind: "custom" });
+  sections.push({ id: "custom", label: "Custom", color: "var(--palette-6)", items: data.custom, kind: "custom" });
   return sections;
 }
 
+function visibleSections(query) {
+  const sections = allSections();
+  const filtered = categoryFilter === "all" ? null : sections.find((s) => s.id === categoryFilter);
+
+  if (query) {
+    const items = search(query, filtered ? new Set(filtered.items) : null);
+    const label = filtered ? `Results in ${filtered.label}` : "Results";
+    return [{ id: "results", label, color: "var(--accent)", items, kind: "results" }];
+  }
+  if (filtered) return [filtered];
+  // In the combined view, an empty favorites section is just noise.
+  return sections.filter((s) => s.items.length || s.kind === "custom");
+}
+
+function setCategory(id) {
+  if (!allSections().some((s) => s.id === id)) id = "all";
+  categoryFilter = id;
+  const section = allSections().find((s) => s.id === id);
+  categoryLabel.textContent = section ? section.label : "All Categories";
+  categoryDot.style.setProperty("--dot-color", section ? section.color : "var(--ink-soft)");
+  categoryDot.hidden = !section;
+  contentEl.scrollTop = 0;
+  render();
+}
+
+// ---------- rendering ----------
+
+let flat = []; // every copyable tile, in visual order
+let selected = -1;
+let addingCustom = false;
+
 function render({ keepSelection = false } = {}) {
   const query = searchEl.value.trim();
-  const sections = query
-    ? [{ id: "results", label: "results", color: "var(--accent)", items: search(query), kind: "results" }]
-    : browseSections();
-
+  const sections = visibleSections(query);
   const prevSelected = selected;
-  const prevChip = flat[selected];
+  const prevTile = flat[selected];
   const favorites = new Set(data.favorites);
   flat = [];
   contentEl.innerHTML = "";
 
   for (const sec of sections) {
     const wrap = el("section", "section");
-    wrap.dataset.id = sec.id;
-
     const head = el("div", "section-head");
-    head.style.setProperty("--dot-color", sec.color);
-    head.append(el("span", "dot"), el("span", "", sec.label), el("span", "count", String(sec.items.length)));
+    head.append(el("span", "", sec.label), el("span", "count", String(sec.items.length)));
     wrap.append(head);
 
-    const chips = el("div", "chips");
-    sec.items.forEach((text, i) => chips.append(buildChip(text, sec, i, favorites)));
-    if (sec.kind === "custom") chips.append(buildAddChip());
+    const tiles = el("div", "tiles");
+    sec.items.forEach((text, i) => tiles.append(buildTile(text, sec, i, favorites)));
+    if (sec.kind === "custom" && !query) tiles.append(buildAddTile());
     if (!sec.items.length && sec.kind === "favorites") {
-      chips.append(el("span", "empty", "right-click any kaomoji to favorite it"));
+      tiles.append(el("div", "empty", "No favorites yet. Select a kaomoji and press Ctrl+D."));
     }
     if (!sec.items.length && sec.kind === "results") {
-      chips.append(el("span", "empty", "no matches"));
+      tiles.append(el("div", "empty", "No kaomoji match that search"));
     }
-    wrap.append(chips);
+    wrap.append(tiles);
     contentEl.append(wrap);
   }
 
-  flat.slice(0, 9).forEach((chip, i) => (chip.dataset.n = String(i + 1)));
+  // Long kaomoji get two cells. Read every width first, then write, so the
+  // browser only lays out once for the measurement.
+  const overflowing = flat.filter((tile) => tile.scrollWidth > tile.clientWidth);
+  overflowing.forEach((tile) => tile.classList.add("wide"));
+
+  flat.slice(0, 9).forEach((tile, i) => (tile.dataset.n = String(i + 1)));
+
   let next = 0;
-  if (keepSelection && prevChip) {
-    // Indices shift when e.g. favorites grows, so follow the same chip.
+  if (keepSelection && prevTile) {
+    // Indices shift when e.g. favorites grows, so follow the same tile.
     const same = flat.findIndex(
-      (c) => c.dataset.text === prevChip.dataset.text && c.dataset.section === prevChip.dataset.section
+      (t) => t.dataset.text === prevTile.dataset.text && t.dataset.section === prevTile.dataset.section
     );
     next = same >= 0 ? same : prevSelected;
   }
   selected = -1;
   select(next, false);
 
-  faceEl.textContent = query && !flat.length ? FACE_SAD : FACE_IDLE;
-  renderRail(Boolean(query));
+  if (!faceTimer) faceEl.textContent = query && !flat.length ? FACE_SAD : FACE_IDLE;
 }
 
-function buildChip(text, sec, indexInSection, favorites) {
-  const chip = el("button", "chip", text);
-  chip.title = text;
-  chip.dataset.text = text;
-  chip.dataset.section = sec.id;
-  if (sec.kind !== "favorites" && favorites.has(text)) chip.classList.add("fav");
+function buildTile(text, sec, indexInSection, favorites) {
+  const tile = el("button", "tile", text);
+  tile.title = text;
+  tile.dataset.text = text;
+  tile.dataset.section = sec.id;
+  tile.dataset.sectionLabel = sec.kind === "results" ? "Search Results" : sec.label;
+  tile.dataset.kind = sec.kind;
+  if (sec.kind !== "favorites" && favorites.has(text)) tile.classList.add("fav");
 
   const flatIndex = flat.length;
-  flat.push(chip);
+  flat.push(tile);
 
-  chip.addEventListener("click", () => useKaomoji(text, chip));
-  chip.addEventListener("contextmenu", (e) => {
+  tile.addEventListener("click", () => runPrimary(flatIndex));
+  tile.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     select(flatIndex, false);
-    openMenu(e.clientX, e.clientY, text, sec.kind);
+    openActions({ x: e.clientX, y: e.clientY });
   });
-  chip.addEventListener("mousemove", (e) => {
+  tile.addEventListener("mousemove", (e) => {
     if (pointerMoved(e) && selected !== flatIndex) select(flatIndex, false);
   });
 
   if (sec.kind === "favorites") {
-    chip.draggable = true;
-    chip.addEventListener("dragstart", (e) => {
+    tile.draggable = true;
+    tile.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/x-fav-index", String(indexInSection));
       e.dataTransfer.effectAllowed = "move";
     });
-    chip.addEventListener("dragover", (e) => {
+    tile.addEventListener("dragover", (e) => {
       if (!e.dataTransfer.types.includes("text/x-fav-index")) return;
       e.preventDefault();
-      chip.classList.add("drop");
+      tile.classList.add("drop");
     });
-    chip.addEventListener("dragleave", () => chip.classList.remove("drop"));
-    chip.addEventListener("drop", (e) => {
+    tile.addEventListener("dragleave", () => tile.classList.remove("drop"));
+    tile.addEventListener("drop", (e) => {
       e.preventDefault();
-      chip.classList.remove("drop");
+      tile.classList.remove("drop");
       const from = Number(e.dataTransfer.getData("text/x-fav-index"));
       if (Number.isNaN(from) || from === indexInSection) return;
       const [moved] = data.favorites.splice(from, 1);
@@ -293,22 +328,18 @@ function buildChip(text, sec, indexInSection, favorites) {
       render({ keepSelection: true });
     });
   }
-  return chip;
+  return tile;
 }
 
-function buildAddChip() {
+function buildAddTile() {
   if (!addingCustom) {
-    const btn = el("button", "chip add", "+ add");
-    btn.title = "add your own kaomoji";
-    btn.addEventListener("click", () => {
-      addingCustom = true;
-      render({ keepSelection: true });
-    });
+    const btn = el("button", "tile add", "+ Add your own");
+    btn.addEventListener("click", startAddingCustom);
     return btn;
   }
 
-  const input = el("input", "chip add-input");
-  input.placeholder = "paste, then ↵";
+  const input = el("input", "tile add-input");
+  input.placeholder = "Paste a kaomoji, then ↵";
   input.spellcheck = false;
   const finish = (save) => {
     if (!addingCustom) return;
@@ -317,6 +348,7 @@ function buildAddChip() {
     if (save && value && !data.custom.includes(value)) {
       data.custom.push(value);
       saveData();
+      flashContext("Added to Custom");
     }
     render({ keepSelection: true });
     searchEl.focus();
@@ -331,60 +363,15 @@ function buildAddChip() {
   return input;
 }
 
-// ---------- rail + scroll spy ----------
-
-function renderRail(searching) {
-  railEl.innerHTML = "";
-  railEl.classList.toggle("dim", searching);
-  for (const sec of browseSections()) {
-    const item = el("button", "rail-item");
-    item.dataset.id = sec.id;
-    item.style.setProperty("--dot-color", sec.color);
-    item.append(el("span", "dot"), el("span", "", sec.label));
-    item.addEventListener("click", () => jumpTo(sec.id));
-    railEl.append(item);
-  }
-  updateScrollSpy();
+function startAddingCustom() {
+  addingCustom = true;
+  searchEl.value = "";
+  if (categoryFilter !== "all" && categoryFilter !== "custom") setCategory("custom");
+  render({ keepSelection: true });
+  contentEl.querySelector(".add-input")?.scrollIntoView({ block: "nearest" });
 }
 
-function jumpTo(id) {
-  if (searchEl.value) {
-    searchEl.value = "";
-    render();
-  }
-  const section = contentEl.querySelector(`[data-id="${id}"]`);
-  if (!section) return;
-  contentEl.scrollTop = section.offsetTop - 2;
-  updateScrollSpy();
-  const firstChip = section.querySelector(".chip:not(.add)");
-  if (firstChip) select(flat.indexOf(firstChip), false);
-  searchEl.focus();
-}
-
-function updateScrollSpy() {
-  let current = null;
-  if (!searchEl.value.trim()) {
-    const atBottom = contentEl.scrollTop + contentEl.clientHeight >= contentEl.scrollHeight - 2;
-    for (const section of contentEl.children) {
-      if (section.offsetTop <= contentEl.scrollTop + 16) current = section.dataset.id;
-    }
-    if (atBottom && contentEl.lastElementChild) current = contentEl.lastElementChild.dataset.id;
-  }
-  for (const item of railEl.children) {
-    const active = item.dataset.id === current;
-    item.classList.toggle("active", active);
-    if (active) {
-      const top = item.offsetTop;
-      const bottom = top + item.offsetHeight;
-      if (top < railEl.scrollTop) railEl.scrollTop = top - 8;
-      else if (bottom > railEl.scrollTop + railEl.clientHeight) railEl.scrollTop = bottom - railEl.clientHeight + 8;
-    }
-  }
-}
-
-contentEl.addEventListener("scroll", updateScrollSpy, { passive: true });
-
-// ---------- selection + keyboard ----------
+// ---------- selection ----------
 
 // Scrolling can fire mousemove without the pointer actually moving; only
 // real movement should steal the keyboard selection.
@@ -398,13 +385,15 @@ function pointerMoved(e) {
 function select(index, scroll = true) {
   flat[selected]?.classList.remove("sel");
   selected = flat.length ? Math.max(0, Math.min(index, flat.length - 1)) : -1;
-  const chip = flat[selected];
-  if (!chip) return;
-  chip.classList.add("sel");
-  if (scroll) chip.scrollIntoView({ block: "nearest" });
+  const tile = flat[selected];
+  if (tile) {
+    tile.classList.add("sel");
+    if (scroll) tile.scrollIntoView({ block: "nearest" });
+  }
+  updateContext();
 }
 
-// Moves to the chip in the nearest row above/below, closest horizontally.
+// Moves to the tile in the nearest row above/below, closest horizontally.
 function moveVertical(dir) {
   const current = flat[selected];
   if (!current) return select(0);
@@ -413,24 +402,281 @@ function moveVertical(dir) {
   let best = -1;
   let bestTop = null;
   let bestDx = Infinity;
-  flat.forEach((chip, i) => {
-    const cr = chip.getBoundingClientRect();
-    if (dir > 0 ? cr.top <= r.top + 4 : cr.top >= r.top - 4) return;
-    const dx = Math.abs(cr.left + cr.width / 2 - cx);
-    const closerRow = bestTop === null || (dir > 0 ? cr.top < bestTop - 2 : cr.top > bestTop + 2);
-    const sameRow = bestTop !== null && Math.abs(cr.top - bestTop) <= 2;
+  flat.forEach((tile, i) => {
+    const tr = tile.getBoundingClientRect();
+    if (dir > 0 ? tr.top <= r.top + 4 : tr.top >= r.top - 4) return;
+    const dx = Math.abs(tr.left + tr.width / 2 - cx);
+    const closerRow = bestTop === null || (dir > 0 ? tr.top < bestTop - 2 : tr.top > bestTop + 2);
+    const sameRow = bestTop !== null && Math.abs(tr.top - bestTop) <= 2;
     if (closerRow || (sameRow && dx < bestDx)) {
       best = i;
-      bestTop = closerRow ? cr.top : bestTop;
+      bestTop = closerRow ? tr.top : bestTop;
       bestDx = dx;
     }
   });
   if (best >= 0) select(best);
 }
 
-function selectedText() {
-  return flat[selected]?.dataset.text;
+// ---------- action bar ----------
+
+let contextTimer = null;
+
+function updateContext() {
+  if (contextTimer) return;
+  const tile = flat[selected];
+  contextEl.textContent = tile ? `Kaomoji – ${tile.dataset.sectionLabel}` : "Kaomoji";
 }
+
+function flashContext(message, ms = 1400) {
+  clearTimeout(contextTimer);
+  contextEl.textContent = message;
+  contextTimer = setTimeout(() => {
+    contextTimer = null;
+    updateContext();
+  }, ms);
+}
+
+function updatePrimaryLabel() {
+  primaryLabel.textContent = data.prefs.autoPaste ? "Paste" : "Copy";
+}
+
+primaryBtn.addEventListener("click", () => runPrimary(selected));
+actionsBtn.addEventListener("click", () => (popoverKind === "actions" ? closePopover() : openActions()));
+
+// ---------- copy / paste ----------
+
+let audioCtx = null;
+let faceTimer = null;
+
+function playCopySound() {
+  if (!data.prefs.sound) return;
+  try {
+    audioCtx = audioCtx || new AudioContext();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.12);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.12);
+  } catch {
+    // no audio device; not worth surfacing
+  }
+}
+
+function runPrimary(index) {
+  const tile = flat[index];
+  if (tile) useKaomoji(tile.dataset.text, tile, data.prefs.autoPaste ? "paste" : "copy");
+}
+
+function runSecondary(index) {
+  const tile = flat[index];
+  if (tile) useKaomoji(tile.dataset.text, tile, data.prefs.autoPaste ? "copy" : "paste");
+}
+
+async function useKaomoji(text, tile, mode) {
+  closePopover();
+  // Deliberately no re-render: reshuffling "Frequently Used" under the
+  // cursor is jarring. The next time the window opens picks it up.
+  recordUse(text);
+  playCopySound();
+  if (tile) {
+    tile.classList.add("flash");
+    setTimeout(() => tile.classList.remove("flash"), 160);
+  }
+  faceEl.textContent = FACE_HAPPY;
+  clearTimeout(faceTimer);
+  faceTimer = setTimeout(() => {
+    faceTimer = null;
+    faceEl.textContent = FACE_IDLE;
+  }, 900);
+
+  try {
+    if (mode === "paste") {
+      await invoke("paste_kaomoji", { text });
+      return;
+    }
+    await window.__TAURI__.clipboardManager.writeText(text);
+  } catch (err) {
+    console.error("copy failed", err);
+    flashContext("Couldn't copy (｡•́︿•̀｡)", 2500);
+    return;
+  }
+  flashContext("Copied to clipboard");
+  if (!data.prefs.stayOpen) setTimeout(hideWindow, 90);
+}
+
+function hideWindow() {
+  invoke("hide_window");
+}
+
+function toggleFavorite(text) {
+  const i = data.favorites.indexOf(text);
+  if (i === -1) data.favorites.push(text);
+  else data.favorites.splice(i, 1);
+  saveData();
+  flashContext(i === -1 ? "Added to Favorites" : "Removed from Favorites");
+  render({ keepSelection: true });
+}
+
+function deleteCustom(text) {
+  data.custom = data.custom.filter((t) => t !== text);
+  saveData();
+  flashContext("Deleted");
+  render({ keepSelection: true });
+}
+
+function forgetUsage(text) {
+  delete data.usage[text];
+  saveData();
+  flashContext("Removed from Frequently Used");
+  render({ keepSelection: true });
+}
+
+// ---------- popover (actions + category picker) ----------
+
+let popoverKind = null;
+let popoverItems = [];
+let popoverActive = -1;
+
+// items: [{ label, keys?, dot?, checked?, danger?, run }] | "sep" | { title }
+function openPopover(kind, items, place) {
+  popoverKind = kind;
+  popoverItems = [];
+  popoverEl.innerHTML = "";
+
+  for (const item of items) {
+    if (item === "sep") {
+      popoverEl.append(el("div", "popover-sep"));
+      continue;
+    }
+    if (item.title) {
+      popoverEl.append(el("div", "popover-title", item.title));
+      continue;
+    }
+    const btn = el("button", "popover-item" + (item.danger ? " danger" : ""));
+    if (item.dot) {
+      const dot = el("span", "dot");
+      dot.style.setProperty("--dot-color", item.dot);
+      btn.append(dot);
+    }
+    btn.append(el("span", "label", item.label));
+    if (item.checked) btn.append(el("span", "check", "✓"));
+    if (item.keys) {
+      const keys = el("span", "keys");
+      item.keys.forEach((k) => keys.append(el("kbd", "", k)));
+      btn.append(keys);
+    }
+    const index = popoverItems.length;
+    btn.addEventListener("mousemove", (e) => {
+      if (pointerMoved(e)) setPopoverActive(index);
+    });
+    btn.addEventListener("click", () => runPopoverItem(index));
+    popoverEl.append(btn);
+    popoverItems.push({ ...item, btn });
+  }
+
+  popoverEl.hidden = false;
+  const appW = appEl.clientWidth;
+  const appH = appEl.clientHeight;
+  const w = popoverEl.offsetWidth;
+  const h = popoverEl.offsetHeight;
+  let x;
+  let y;
+  if (place === "actions") {
+    x = appW - w - 8;
+    y = appH - h - 48;
+  } else if (place === "category") {
+    const r = categoryBtn.getBoundingClientRect();
+    const a = appEl.getBoundingClientRect();
+    x = r.right - a.left - w;
+    y = r.bottom - a.top + 6;
+  } else {
+    x = place.x;
+    y = place.y;
+  }
+  popoverEl.style.left = `${Math.max(6, Math.min(x, appW - w - 6))}px`;
+  popoverEl.style.top = `${Math.max(6, Math.min(y, appH - h - 6))}px`;
+
+  const checkedIndex = popoverItems.findIndex((i) => i.checked);
+  setPopoverActive(checkedIndex >= 0 ? checkedIndex : 0);
+  categoryBtn.classList.toggle("open", kind === "category");
+}
+
+function setPopoverActive(index) {
+  popoverItems[popoverActive]?.btn.classList.remove("active");
+  popoverActive = (index + popoverItems.length) % popoverItems.length;
+  const item = popoverItems[popoverActive];
+  item?.btn.classList.add("active");
+  item?.btn.scrollIntoView({ block: "nearest" });
+}
+
+function runPopoverItem(index) {
+  const item = popoverItems[index];
+  closePopover();
+  item?.run();
+}
+
+function closePopover() {
+  if (!popoverKind) return;
+  popoverKind = null;
+  popoverEl.hidden = true;
+  categoryBtn.classList.remove("open");
+}
+
+function openActions(place = "actions") {
+  const tile = flat[selected];
+  if (!tile) {
+    openPopover("actions", [{ label: "Add Custom Kaomoji…", run: startAddingCustom }], place);
+    return;
+  }
+  const text = tile.dataset.text;
+  const paste = { label: "Paste into Last App", run: () => useKaomoji(text, tile, "paste") };
+  const copy = { label: "Copy to Clipboard", run: () => useKaomoji(text, tile, "copy") };
+  const [primary, secondary] = data.prefs.autoPaste ? [paste, copy] : [copy, paste];
+  const isFav = data.favorites.includes(text);
+
+  const items = [
+    { title: text },
+    { ...primary, keys: ["↵"] },
+    { ...secondary, keys: ["Ctrl", "↵"] },
+    "sep",
+    { label: isFav ? "Remove from Favorites" : "Add to Favorites", keys: ["Ctrl", "D"], run: () => toggleFavorite(text) },
+  ];
+  if (tile.dataset.kind === "frequent") items.push({ label: "Remove from Frequently Used", run: () => forgetUsage(text) });
+  items.push("sep", { label: "Add Custom Kaomoji…", run: startAddingCustom });
+  if (tile.dataset.kind === "custom") items.push({ label: "Delete", danger: true, run: () => deleteCustom(text) });
+  openPopover("actions", items, place);
+}
+
+function openCategories() {
+  const items = [
+    { label: "All Categories", checked: categoryFilter === "all", run: () => setCategory("all") },
+    "sep",
+    ...allSections().map((s) => ({
+      label: s.label,
+      dot: s.color,
+      checked: categoryFilter === s.id,
+      run: () => setCategory(s.id),
+    })),
+  ];
+  openPopover("category", items, "category");
+}
+
+categoryBtn.addEventListener("click", () => (popoverKind === "category" ? closePopover() : openCategories()));
+
+document.addEventListener("mousedown", (e) => {
+  if (popoverKind && !popoverEl.contains(e.target) && !categoryBtn.contains(e.target) && !actionsBtn.contains(e.target)) {
+    closePopover();
+  }
+});
+// Wheel rather than scroll: programmatic scrolls (scrollIntoView) fire a
+// late scroll event that would close a popover that just opened.
+contentEl.addEventListener("wheel", () => popoverKind === "actions" && closePopover(), { passive: true });
+
+// ---------- keyboard ----------
 
 document.addEventListener("keydown", (e) => {
   if (!settingsPanel.hidden) {
@@ -442,19 +688,47 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
-  if (!menuEl.hidden) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closeMenu();
-    }
+
+  const ctrl = e.ctrlKey || e.metaKey;
+  const key = e.key.toLowerCase();
+
+  if (ctrl && key === "k") {
+    e.preventDefault();
+    popoverKind === "actions" ? closePopover() : openActions();
+    return;
+  }
+  if (ctrl && key === "p") {
+    e.preventDefault();
+    popoverKind === "category" ? closePopover() : openCategories();
+    return;
+  }
+
+  if (popoverKind) {
+    if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) setPopoverActive(popoverActive + 1);
+    else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) setPopoverActive(popoverActive - 1);
+    else if (e.key === "Enter") runPopoverItem(popoverActive);
+    else if (e.key === "Escape") closePopover();
+    else return;
+    e.preventDefault();
+    return;
+  }
+
+  if (ctrl && e.key === "Enter") {
+    e.preventDefault();
+    runSecondary(selected);
+    return;
+  }
+  if (ctrl && key === "d") {
+    e.preventDefault();
+    const tile = flat[selected];
+    if (tile) toggleFavorite(tile.dataset.text);
     return;
   }
 
   const digit = /^[1-9]$/.test(e.key) ? Number(e.key) : 0;
-  if (digit && (e.ctrlKey || e.altKey || !searchEl.value)) {
+  if (digit && (ctrl || e.altKey || !searchEl.value)) {
     e.preventDefault();
-    const chip = flat[digit - 1];
-    if (chip) useKaomoji(chip.dataset.text, chip);
+    runPrimary(digit - 1);
     return;
   }
 
@@ -481,28 +755,24 @@ document.addEventListener("keydown", (e) => {
       return;
     case "Enter":
       e.preventDefault();
-      if (selectedText()) useKaomoji(selectedText(), flat[selected]);
+      runPrimary(selected);
       return;
     case "Escape":
       e.preventDefault();
       if (searchEl.value) {
         searchEl.value = "";
         render();
+      } else if (categoryFilter !== "all") {
+        setCategory("all");
       } else {
         hideWindow();
       }
       return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
-    e.preventDefault();
-    if (selectedText()) toggleFavorite(selectedText());
-    return;
-  }
-
   // Typing anywhere goes to search. Only move focus: the browser then types
   // the character into the input itself.
-  if (document.activeElement !== searchEl && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+  if (document.activeElement !== searchEl && e.key.length === 1 && !ctrl && !e.altKey) {
     searchEl.focus();
   }
 });
@@ -516,127 +786,6 @@ searchEl.addEventListener("input", () => {
 document.addEventListener("contextmenu", (e) => {
   if (!e.target.closest("input")) e.preventDefault();
 });
-
-// ---------- context menu ----------
-
-function openMenu(x, y, text, kind) {
-  menuEl.innerHTML = "";
-  const isFav = data.favorites.includes(text);
-  const add = (label, action, className) => {
-    const btn = el("button", className, label);
-    btn.addEventListener("click", () => {
-      closeMenu();
-      action();
-    });
-    menuEl.append(btn);
-  };
-  add("copy", () => useKaomoji(text, flat[selected]));
-  add(isFav ? "unfavorite" : "favorite", () => toggleFavorite(text));
-  if (kind === "recent") add("remove from recent", () => forgetUsage(text));
-  if (kind === "custom") add("delete", () => deleteCustom(text), "danger");
-
-  menuEl.hidden = false;
-  const app = menuEl.offsetParent;
-  const maxX = app.clientWidth - menuEl.offsetWidth - 6;
-  const maxY = app.clientHeight - menuEl.offsetHeight - 6;
-  menuEl.style.left = `${Math.max(6, Math.min(x, maxX))}px`;
-  menuEl.style.top = `${Math.max(6, Math.min(y, maxY))}px`;
-}
-
-function closeMenu() {
-  menuEl.hidden = true;
-}
-
-document.addEventListener("mousedown", (e) => {
-  if (!menuEl.hidden && !menuEl.contains(e.target)) closeMenu();
-});
-// Wheel rather than scroll: programmatic scrolls (scrollIntoView) fire a
-// late scroll event that would close a menu that just opened.
-contentEl.addEventListener("wheel", closeMenu, { passive: true });
-
-function toggleFavorite(text) {
-  const i = data.favorites.indexOf(text);
-  if (i === -1) data.favorites.push(text);
-  else data.favorites.splice(i, 1);
-  saveData();
-  setStatus(i === -1 ? "added to favorites" : "removed from favorites");
-  render({ keepSelection: true });
-}
-
-function deleteCustom(text) {
-  data.custom = data.custom.filter((t) => t !== text);
-  saveData();
-  render({ keepSelection: true });
-}
-
-function forgetUsage(text) {
-  delete data.usage[text];
-  saveData();
-  render({ keepSelection: true });
-}
-
-// ---------- copy / paste ----------
-
-let audioCtx = null;
-let faceTimer = null;
-let statusTimer = null;
-
-function setStatus(message, ms = 900) {
-  statusEl.textContent = message;
-  clearTimeout(statusTimer);
-  statusTimer = setTimeout(() => (statusEl.textContent = HINT), ms);
-}
-
-function playCopySound() {
-  if (!data.prefs.sound) return;
-  try {
-    audioCtx = audioCtx || new AudioContext();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.12);
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.12);
-  } catch {
-    // no audio device; not worth surfacing
-  }
-}
-
-async function useKaomoji(text, chip) {
-  closeMenu();
-  // Deliberately no re-render: reshuffling "recent" under the cursor is
-  // jarring. The next time the window opens picks it up.
-  recordUse(text);
-  playCopySound();
-  if (chip) {
-    chip.classList.add("flash");
-    setTimeout(() => chip.classList.remove("flash"), 160);
-  }
-  faceEl.textContent = FACE_HAPPY;
-  clearTimeout(faceTimer);
-  faceTimer = setTimeout(() => (faceEl.textContent = FACE_IDLE), 900);
-
-  try {
-    if (data.prefs.autoPaste) {
-      await invoke("paste_kaomoji", { text });
-      return;
-    }
-    await window.__TAURI__.clipboardManager.writeText(text);
-  } catch (err) {
-    console.error("copy failed", err);
-    setStatus("couldn't copy (｡•́︿•̀｡)", 2000);
-    return;
-  }
-  setStatus("copied!");
-  if (!data.prefs.stayOpen) setTimeout(hideWindow, 90);
-}
-
-function hideWindow() {
-  invoke("hide_window");
-}
 
 // ---------- settings ----------
 
@@ -655,12 +804,14 @@ function applyPrefs() {
   autoPasteToggle.checked = data.prefs.autoPaste;
   soundToggle.checked = data.prefs.sound;
   applyTheme(data.prefs.theme);
+  updatePrimaryLabel();
 }
 
 function bindPref(toggle, key) {
   toggle.addEventListener("change", () => {
     data.prefs[key] = toggle.checked;
     saveData();
+    updatePrimaryLabel();
   });
 }
 bindPref(stayOpenToggle, "stayOpen");
@@ -676,7 +827,7 @@ themeSegmented.addEventListener("click", (e) => {
 });
 
 function openSettings() {
-  closeMenu();
+  closePopover();
   settingsPanel.hidden = false;
 }
 
@@ -692,7 +843,6 @@ settingsBackBtn.addEventListener("click", closeSettings);
 function showHotkeyLabel(label) {
   hotkeyLabel = label;
   hotkeyBtn.textContent = label;
-  hotkeyLabelEl.textContent = label.toLowerCase();
 }
 
 async function loadBackendSettings() {
@@ -711,7 +861,7 @@ autostartToggle.addEventListener("change", async () => {
     await invoke("set_autostart", { enabled: desired });
   } catch {
     autostartToggle.checked = !desired;
-    hotkeyHint.textContent = "couldn't update the startup setting";
+    hotkeyHint.textContent = "Couldn't update the startup setting";
   }
 });
 
@@ -732,8 +882,8 @@ hotkeyBtn.addEventListener("click", () => {
   // Otherwise pressing the current combo would hide the window mid-recording.
   invoke("pause_hotkey").catch(() => {});
   hotkeyBtn.classList.add("recording");
-  hotkeyBtn.textContent = "press keys…";
-  hotkeyHint.textContent = "include ctrl, alt, shift or win · esc to cancel";
+  hotkeyBtn.textContent = "Press keys…";
+  hotkeyHint.textContent = "Include Ctrl, Alt, Shift or Win · Esc to cancel";
 });
 
 function cancelHotkeyRecording() {
@@ -754,7 +904,7 @@ async function handleHotkeyRecording(e) {
 
   const combo = { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey, code: e.code };
   if (!combo.ctrl && !combo.alt && !combo.shift && !combo.meta) {
-    hotkeyHint.textContent = "needs a modifier key — try again";
+    hotkeyHint.textContent = "Needs a modifier key — try again";
     return;
   }
 
@@ -771,7 +921,7 @@ async function handleHotkeyRecording(e) {
   try {
     await invoke("set_hotkey", { hotkey: combo });
     showHotkeyLabel(combo.label);
-    hotkeyHint.textContent = "saved!";
+    hotkeyHint.textContent = "Saved";
     setTimeout(() => (hotkeyHint.textContent = ""), 1500);
   } catch (err) {
     // The backend has already put the previous hotkey back.
@@ -784,21 +934,18 @@ async function handleHotkeyRecording(e) {
 
 function onShown() {
   if (!settingsPanel.hidden) closeSettings();
-  closeMenu();
+  closePopover();
   addingCustom = false;
   searchEl.value = "";
-  render();
-  contentEl.scrollTop = 0;
-  updateScrollSpy();
+  setCategory("all");
   setTimeout(() => searchEl.focus(), 0);
 }
 
 (async () => {
   window.__TAURI__.event.listen("shown", onShown);
-  statusEl.textContent = HINT;
   await loadData();
   applyPrefs();
-  render();
+  setCategory("all");
   loadBackendSettings();
   searchEl.focus();
 })();

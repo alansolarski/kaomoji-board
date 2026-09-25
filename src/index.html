@@ -8,16 +8,22 @@
   <body>
     <div class="app" id="app">
       <header class="topbar">
-        <span class="face" id="face" title="drag to move">( ˘ω˘ )</span>
         <input
           id="search"
           class="search"
           type="text"
-          placeholder="search kaomoji…"
+          placeholder="Search kaomoji…"
           autocomplete="off"
           spellcheck="false"
         />
-        <button class="icon-btn" id="settingsBtn" title="settings" aria-label="settings">
+        <button class="dropdown-btn" id="categoryBtn" title="Filter by category (Ctrl+P)">
+          <span class="dot" id="categoryDot"></span>
+          <span id="categoryLabel">All Categories</span>
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4.5 6.5 8 10l3.5-3.5" />
+          </svg>
+        </button>
+        <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
             <path d="M2 4.5h6.5M12.5 4.5H14M2 11.5h1.5M7.5 11.5H14" />
             <circle cx="10.5" cy="4.5" r="1.75" />
@@ -26,46 +32,62 @@
         </button>
       </header>
 
-      <div class="body">
-        <nav class="rail" id="rail"></nav>
-        <main class="content" id="content"></main>
-      </div>
+      <main class="content" id="content"></main>
 
-      <footer class="statusbar">
-        <span id="status"></span>
-        <span id="hotkeyLabel"></span>
+      <footer class="actionbar">
+        <div class="actionbar-left">
+          <span class="app-icon" id="face">( ˘ω˘ )</span>
+          <span class="context" id="context"></span>
+        </div>
+        <div class="actionbar-right">
+          <button class="bar-btn" id="primaryBtn">
+            <span id="primaryLabel">Copy</span>
+            <kbd>↵</kbd>
+          </button>
+          <span class="bar-divider"></span>
+          <button class="bar-btn" id="actionsBtn">
+            <span>Actions</span>
+            <kbd>Ctrl</kbd><kbd>K</kbd>
+          </button>
+        </div>
       </footer>
 
-      <div class="menu" id="menu" hidden></div>
+      <div class="popover" id="popover" hidden></div>
 
       <div class="settings-panel" id="settingsPanel" hidden>
-        <div class="settings-header">
-          <button class="icon-btn" id="settingsBackBtn" title="back (esc)" aria-label="back">←</button>
-          <span class="settings-title">settings</span>
-        </div>
+        <header class="topbar settings-top">
+          <button class="icon-btn back-btn" id="settingsBackBtn" title="Back (Esc)" aria-label="Back">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M13 8H3M7 4 3 8l4 4" />
+            </svg>
+          </button>
+          <span class="settings-title">Settings</span>
+        </header>
 
         <div class="settings-body">
           <label class="setting-row">
-            <span>stay open after copying</span>
+            <span class="setting-text">
+              <span>Stay open after copying</span>
+            </span>
             <span class="toggle">
               <input type="checkbox" id="stayOpenToggle" />
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </span>
           </label>
 
-          <div>
-            <label class="setting-row">
-              <span>auto-paste into last app</span>
-              <span class="toggle">
-                <input type="checkbox" id="autoPasteToggle" />
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </span>
-            </label>
-            <p class="setting-hint">pastes straight into the app you were using, then restores your clipboard</p>
-          </div>
+          <label class="setting-row">
+            <span class="setting-text">
+              <span>Paste into the last app</span>
+              <span class="setting-hint">Enter pastes directly and restores your clipboard. Ctrl+Enter still just copies.</span>
+            </span>
+            <span class="toggle">
+              <input type="checkbox" id="autoPasteToggle" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </span>
+          </label>
 
           <label class="setting-row">
-            <span>copy sound</span>
+            <span class="setting-text"><span>Copy sound</span></span>
             <span class="toggle">
               <input type="checkbox" id="soundToggle" />
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -73,7 +95,7 @@
           </label>
 
           <label class="setting-row">
-            <span>launch at startup</span>
+            <span class="setting-text"><span>Launch at startup</span></span>
             <span class="toggle">
               <input type="checkbox" id="autostartToggle" />
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -81,20 +103,20 @@
           </label>
 
           <div class="setting-row">
-            <span>theme</span>
+            <span class="setting-text"><span>Theme</span></span>
             <div class="segmented" id="themeSegmented">
-              <button data-theme="auto" class="seg-btn">auto</button>
-              <button data-theme="light" class="seg-btn">light</button>
-              <button data-theme="dark" class="seg-btn">dark</button>
+              <button data-theme="auto" class="seg-btn">Auto</button>
+              <button data-theme="light" class="seg-btn">Light</button>
+              <button data-theme="dark" class="seg-btn">Dark</button>
             </div>
           </div>
 
-          <div>
-            <div class="setting-row">
-              <span>global hotkey</span>
-              <button class="hotkey-btn" id="hotkeyBtn">…</button>
-            </div>
-            <p class="setting-hint" id="hotkeyHint"></p>
+          <div class="setting-row">
+            <span class="setting-text">
+              <span>Global hotkey</span>
+              <span class="setting-hint" id="hotkeyHint"></span>
+            </span>
+            <button class="hotkey-btn" id="hotkeyBtn">…</button>
           </div>
         </div>
       </div>
