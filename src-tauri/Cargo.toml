@@ -1,6 +1,6 @@
 [package]
 name = "kaomoji-board"
-version = "0.2.0"
+version = "0.3.0"
 description = "A tiny cute kaomoji copy/paste board"
 edition = "2021"
 

@@ -1,4 +1,4 @@
-import { categories, searchTags } from "./kaomoji-data.js";
+import { categories as rawCategories } from "./kaomoji-data.js";
 
 const $ = (id) => document.getElementById(id);
 const appEl = $("app");
@@ -126,13 +126,19 @@ function frequentItems() {
 
 // ---------- search ----------
 
-const categoryKeywords = new Map();
-for (const [keyword, names] of Object.entries(searchTags)) {
-  for (const name of names) {
-    if (!categoryKeywords.has(name)) categoryKeywords.set(name, []);
-    categoryKeywords.get(name).push(keyword);
-  }
-}
+const words = (s) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+// Items are either "text" or ["text", "keywords"]; flatten once up front.
+const categories = rawCategories.map((cat) => {
+  const nameWords = words(cat.name);
+  const catKeywords = [...nameWords, nameWords.join(""), ...words(cat.keywords)];
+  const entries = cat.items.map((item) =>
+    typeof item === "string"
+      ? { text: item, keywords: catKeywords }
+      : { text: item[0], keywords: [...catKeywords, ...words(item[1])] }
+  );
+  return { name: cat.name, entries, items: entries.map((e) => e.text) };
+});
 
 function buildIndex() {
   const byText = new Map();
@@ -145,9 +151,7 @@ function buildIndex() {
     keywords.forEach((k) => entry.keywords.add(k));
   };
   for (const cat of categories) {
-    const words = cat.name.toLowerCase().split(" ");
-    const keywords = [...words, words.join(""), ...(categoryKeywords.get(cat.name) || [])];
-    cat.items.forEach((t) => add(t, keywords));
+    cat.entries.forEach((e) => add(e.text, e.keywords));
   }
   data.custom.forEach((t) => add(t, ["custom"]));
   data.favorites.forEach((t) => add(t, ["favorite", "favourite"]));
@@ -262,10 +266,12 @@ function render({ keepSelection = false } = {}) {
     contentEl.append(wrap);
   }
 
-  // Long kaomoji get two cells. Read every width first, then write, so the
-  // browser only lays out once for the measurement.
-  const overflowing = flat.filter((tile) => tile.scrollWidth > tile.clientWidth);
-  overflowing.forEach((tile) => tile.classList.add("wide"));
+  // Long kaomoji get two cells, and the few that still don't fit get the
+  // whole row. Read all widths before writing so each pass lays out once.
+  const overflows = (tile) => tile.scrollWidth > tile.clientWidth;
+  const wide = flat.filter(overflows);
+  wide.forEach((tile) => tile.classList.add("wide"));
+  wide.filter(overflows).forEach((tile) => tile.classList.add("full"));
 
   flat.slice(0, 9).forEach((tile, i) => (tile.dataset.n = String(i + 1)));
 
