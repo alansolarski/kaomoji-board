@@ -526,7 +526,7 @@ kbd {
 }
 
 .bar-divider {
-  width: 3px;
+  width: 2.5px;
   height: 16px;
   margin: 0 6px;
   border-radius: 999px;
