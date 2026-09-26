@@ -23,16 +23,13 @@ jobs:
             throw "Tag ${{ github.ref_name }} doesn't match app version $version"
           }
 
+      # No dependency caches: GitHub scopes caches to the ref that saved them,
+      # and every release runs on a fresh tag, so they'd never be reused.
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
 
       - run: npm ci
 
