@@ -2131,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "kaomoji-board"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "enigo",
  "serde",
