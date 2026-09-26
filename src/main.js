@@ -292,35 +292,100 @@ function buildIndex() {
   return [...byText.values()];
 }
 
-// 3 = exact keyword, 2 = keyword prefix, 1 = appears in the kaomoji itself.
+// Returns [quality, keyword that matched]. 3 = exact keyword, 2 = keyword
+// prefix, 1 = appears in the kaomoji itself (no keyword).
 function matchQuality(entry, token) {
   let best = entry.text.toLowerCase().includes(token) ? 1 : 0;
+  let matched = null;
   for (const kw of entry.keywords) {
-    if (kw === token) return 3;
-    if (kw.startsWith(token)) best = 2;
+    if (kw === token) return [3, kw];
+    if (best < 2 && kw.startsWith(token)) {
+      best = 2;
+      matched = kw;
+    }
   }
-  return best;
+  return [best, matched];
 }
 
-function search(query, within) {
+// Edit distance counting a swap of neighbours as one edit ("hpapy"), with
+// an early exit once it can't come in under `max`.
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev2 = null;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let d = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost);
+      if (prev2 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d = Math.min(d, prev2[j - 2] + 1);
+      row.push(d);
+      rowMin = Math.min(rowMin, d);
+    }
+    if (rowMin > max) return max + 1;
+    prev2 = prev;
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+// Typo tolerance, only used when an exact search finds nothing: a keyword
+// (or the start of one, for longer words) within one or two typos.
+function fuzzyKeyword(entry, token) {
+  if (token.length < 4) return null;
+  const max = token.length >= 7 ? 2 : 1;
+  for (const kw of entry.keywords) {
+    if (editDistance(token, kw, max) <= max) return kw;
+    if (token.length >= 5 && kw.length > token.length && editDistance(token, kw.slice(0, token.length), max) <= max) {
+      return kw;
+    }
+  }
+  return null;
+}
+
+// Returns matching kaomoji, best first, and for each the keywords that
+// matched (shown in the action bar).
+function search(query, within, { fuzzy = false } = {}) {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   const now = Date.now();
   const results = [];
   for (const entry of buildIndex()) {
     if (within && !within.has(entry.text)) continue;
     let total = 0;
+    const matched = [];
     for (const token of tokens) {
-      const q = matchQuality(entry, token);
+      let [q, kw] = matchQuality(entry, token);
+      if (!q && fuzzy) {
+        kw = fuzzyKeyword(entry, token);
+        q = kw ? 1 : 0;
+      }
       if (!q) {
         total = 0;
         break;
       }
       total += q;
+      if (kw && !matched.includes(kw)) matched.push(kw);
     }
-    if (total) results.push({ entry, total, score: usageScore(entry.text, now) });
+    if (total) results.push({ entry, total, matched, score: usageScore(entry.text, now) });
   }
   results.sort((a, b) => b.total - a.total || b.score - a.score || a.entry.order - b.entry.order);
-  return results.map((r) => r.entry.text);
+  return {
+    items: results.map((r) => r.entry.text),
+    matches: new Map(results.map((r) => [r.entry.text, r.matched])),
+  };
+}
+
+// Categories and keywords for each kaomoji, for Quick Look.
+const kaomojiInfo = new Map();
+for (const cat of rawCategories) {
+  for (const item of cat.items) {
+    const [text, keywords] = typeof item === "string" ? [item, ""] : item;
+    let info = kaomojiInfo.get(text);
+    if (!info) kaomojiInfo.set(text, (info = { categories: [], keywords: new Set() }));
+    info.categories.push(cat.name);
+    words(keywords).forEach((w) => info.keywords.add(w));
+  }
 }
 
 // ---------- sections + category filter ----------
@@ -346,9 +411,14 @@ function visibleSections(query) {
   const filtered = categoryFilter === "all" ? null : sections.find((s) => s.id === categoryFilter);
 
   if (query) {
-    const items = search(query, filtered ? new Set(filtered.items) : null);
-    const label = filtered ? `Results in ${filtered.label}` : "Results";
-    return [{ id: "results", label, items, kind: "results" }];
+    const within = filtered ? new Set(filtered.items) : null;
+    let found = search(query, within);
+    let label = filtered ? `Results in ${filtered.label}` : "Results";
+    if (!found.items.length) {
+      found = search(query, within, { fuzzy: true });
+      if (found.items.length) label = filtered ? `Closest Matches in ${filtered.label}` : "Closest Matches";
+    }
+    return [{ id: "results", label, items: found.items, matches: found.matches, kind: "results" }];
   }
   if (filtered) return [filtered];
   // In the combined view, an empty favorites section is just noise.
@@ -378,6 +448,7 @@ function render({ keepSelection = false } = {}) {
   const prevTile = flat[selected];
   const favorites = new Set(data.favorites);
   flat = [];
+  fallbackAction = null;
   contentEl.innerHTML = "";
 
   for (const sec of sections) {
@@ -393,7 +464,7 @@ function render({ keepSelection = false } = {}) {
       tiles.append(el("div", "empty", "No favorites yet. Select a kaomoji and press Ctrl+D."));
     }
     if (!sec.items.length && sec.kind === "results") {
-      tiles.append(el("div", "empty", "No kaomoji match that search"));
+      tiles.append(el("div", "empty", "No kaomoji match that search"), buildFallback(query));
     }
     wrap.append(tiles);
     contentEl.append(wrap);
@@ -473,6 +544,8 @@ function buildTile(text, sec, indexInSection, favorites) {
   tile.dataset.section = sec.id;
   tile.dataset.sectionLabel = sec.kind === "results" ? "Search Results" : sec.label;
   tile.dataset.kind = sec.kind;
+  const matched = sec.matches?.get(text);
+  if (matched?.length) tile.dataset.match = matched.map((kw) => `“${kw}”`).join(", ");
   const isFav = favorites.has(text);
   if (isFav) tile.classList.add("fav");
 
@@ -559,6 +632,27 @@ function buildAddTile() {
   return input;
 }
 
+// When a search finds nothing, offer to save what was typed (usually a
+// pasted kaomoji) as a custom one. Enter runs it, since there's no tile.
+let fallbackAction = null;
+
+function buildFallback(query) {
+  const btn = el("button", "tile fallback");
+  btn.append(icon("ui:add", 14), el("span", "fallback-label", `Add “${query}” to Custom`), el("kbd", "", "↵"));
+  fallbackAction = () => addCustomFromSearch(query);
+  btn.addEventListener("click", fallbackAction);
+  return btn;
+}
+
+function addCustomFromSearch(text) {
+  if (!data.custom.includes(text)) data.custom.push(text);
+  saveData();
+  searchEl.value = "";
+  setCategory("custom");
+  select(flat.findIndex((t) => t.dataset.text === text));
+  flashContext("Added to Custom");
+}
+
 function startAddingCustom() {
   addingCustom = true;
   searchEl.value = "";
@@ -587,6 +681,7 @@ function select(index, scroll = true) {
     if (scroll) tile.scrollIntoView({ block: "nearest" });
   }
   updateContext();
+  if (previewOpen) renderPreview();
 }
 
 // Moves to the tile in the nearest row above/below, closest horizontally.
@@ -620,7 +715,9 @@ let contextTimer = null;
 function updateContext() {
   if (contextTimer) return;
   const tile = flat[selected];
-  contextEl.textContent = tile ? `Kaomoji – ${tile.dataset.sectionLabel}` : "Kaomoji";
+  if (!tile) contextEl.textContent = "Kaomoji";
+  else if (tile.dataset.match) contextEl.textContent = `Kaomoji – matched ${tile.dataset.match}`;
+  else contextEl.textContent = `Kaomoji – ${tile.dataset.sectionLabel}`;
 }
 
 function flashContext(message, ms = 1400) {
@@ -724,8 +821,19 @@ async function useKaomoji(text, tile, mode) {
     return;
   }
   flashContext("Copied to clipboard");
-  if (!data.prefs.stayOpen) setTimeout(hideWindow, 90);
-  else if (pendingCelebration) setTimeout(celebrate, 700);
+  if (!data.prefs.stayOpen) {
+    setTimeout(() => {
+      hideWindow();
+      // The board is gone, so confirm the copy with a little HUD instead.
+      // Pasting needs none: the kaomoji shows up where you're typing.
+      invoke("show_hud", { text, dark: isDark() }).catch(() => {});
+    }, 90);
+  } else if (pendingCelebration) setTimeout(celebrate, 700);
+}
+
+function isDark() {
+  const theme = data.prefs.theme;
+  return theme === "dark" || (theme === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
 }
 
 function hideWindow() {
@@ -751,6 +859,17 @@ function toggleFavorite(text) {
     });
   }
   commit();
+}
+
+// Nudges a favorite one place earlier (-1) or later (+1).
+function moveFavorite(text, delta) {
+  const from = data.favorites.indexOf(text);
+  const to = from + delta;
+  if (from === -1 || to < 0 || to >= data.favorites.length) return;
+  data.favorites.splice(from, 1);
+  data.favorites.splice(to, 0, text);
+  commit();
+  flat[selected]?.scrollIntoView({ block: "nearest" });
 }
 
 function deleteCustom(text) {
@@ -954,9 +1073,19 @@ function openActions(place = "actions") {
       run: () => toggleFavorite(text),
     },
   ];
+  if (tile.dataset.kind === "favorites") {
+    const at = data.favorites.indexOf(text);
+    if (at > 0) {
+      items.push({ label: "Move Left", icon: "ui:move-left", keys: ["Ctrl", "Shift", "←"], run: () => moveFavorite(text, -1) });
+    }
+    if (at < data.favorites.length - 1) {
+      items.push({ label: "Move Right", icon: "ui:move-right", keys: ["Ctrl", "Shift", "→"], run: () => moveFavorite(text, 1) });
+    }
+  }
   if (tile.dataset.kind === "frequent") {
     items.push({ label: "Remove from Frequently Used", icon: "ui:forget", run: () => forgetUsage(text) });
   }
+  items.push({ label: "Quick Look", icon: "ui:preview", keys: ["Ctrl", "Y"], run: openPreview });
   items.push("sep", addCustom, { label: "Your Stats…", icon: "ui:stats", run: openStats });
   if (tile.dataset.kind === "custom") {
     items.push({ label: "Delete", icon: "ui:delete", danger: true, run: () => deleteCustom(text) });
@@ -989,6 +1118,84 @@ document.addEventListener("mousedown", (e) => {
 // late scroll event that would close a popover that just opened.
 contentEl.addEventListener("wheel", () => popoverKind === "actions" && closePopover(), { passive: true });
 
+// ---------- Quick Look ----------
+
+// A big view of the selected kaomoji, for the dense ones that are hard to
+// read at tile size. Arrow keys keep browsing while it's open.
+const previewEl = $("preview");
+let previewOpen = false;
+
+function openPreview() {
+  if (!flat[selected]) return;
+  closePopover();
+  previewOpen = true;
+  renderPreview();
+  previewEl.hidden = false;
+}
+
+function closePreview() {
+  previewOpen = false;
+  previewEl.hidden = true;
+}
+
+function renderPreview() {
+  const tile = flat[selected];
+  if (!tile) return closePreview();
+  const text = tile.dataset.text;
+  const info = kaomojiInfo.get(text);
+  const card = el("div", "preview-card");
+  card.append(el("div", "preview-text kaomoji-font", text));
+
+  const meta = el("div", "preview-meta");
+  const places = [...(info?.categories ?? []), ...(data.custom.includes(text) ? ["Custom"] : [])];
+  meta.append(el("span", "", places.join(" · ") || tile.dataset.sectionLabel));
+  const copies = data.stats.counts[text] || 0;
+  meta.append(el("span", "", copies === 0 ? "Not copied yet" : copies === 1 ? "Copied once" : `Copied ${copies} times`));
+  if (data.favorites.includes(text)) {
+    const fav = el("span", "preview-fav");
+    fav.append(icon("favorites", 12), el("span", "", "Favorite"));
+    meta.append(fav);
+  }
+  card.append(meta);
+
+  if (info?.keywords.size) {
+    const chips = el("div", "preview-chips");
+    info.keywords.forEach((kw) => chips.append(el("span", "chip", kw)));
+    card.append(chips);
+  }
+
+  const hint = el("div", "preview-hint");
+  const keys = (label, ...caps) => {
+    const group = el("span");
+    caps.forEach((c) => group.append(el("kbd", "", c)));
+    group.append(el("span", "", label));
+    hint.append(group);
+  };
+  keys("Browse", "←", "→");
+  keys(primaryLabel.textContent, "↵");
+  keys("Close", "Esc");
+  card.append(hint);
+  previewEl.replaceChildren(card);
+}
+
+function handlePreviewKey(e, ctrl, key) {
+  e.preventDefault();
+  const tile = flat[selected];
+  if (e.key === "Escape" || e.key === " " || (ctrl && key === "y")) closePreview();
+  else if (e.key === "ArrowLeft") select(selected - 1);
+  else if (e.key === "ArrowRight") select(selected + 1);
+  else if (e.key === "ArrowUp") moveVertical(-1);
+  else if (e.key === "ArrowDown") moveVertical(1);
+  else if (e.key === "Enter") {
+    closePreview();
+    ctrl ? runSecondary(selected) : runPrimary(selected);
+  } else if (ctrl && key === "d" && tile) toggleFavorite(tile.dataset.text);
+}
+
+previewEl.addEventListener("mousedown", (e) => {
+  if (e.target === previewEl) closePreview();
+});
+
 // ---------- keyboard ----------
 
 document.addEventListener("keydown", (e) => {
@@ -1011,6 +1218,17 @@ document.addEventListener("keydown", (e) => {
 
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.toLowerCase();
+
+  if (previewOpen) {
+    handlePreviewKey(e, ctrl, key);
+    return;
+  }
+  // Space only while the search is empty, so it can still separate words.
+  if ((ctrl && key === "y") || (e.key === " " && !searchEl.value && !popoverKind)) {
+    e.preventDefault();
+    openPreview();
+    return;
+  }
 
   if (ctrl && key === "k") {
     e.preventDefault();
@@ -1050,6 +1268,12 @@ document.addEventListener("keydown", (e) => {
     if (tile) toggleFavorite(tile.dataset.text);
     return;
   }
+  if (ctrl && e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+    e.preventDefault();
+    const tile = flat[selected];
+    if (tile?.dataset.kind === "favorites") moveFavorite(tile.dataset.text, e.key === "ArrowLeft" ? -1 : 1);
+    return;
+  }
 
   const digit = /^[1-9]$/.test(e.key) ? Number(e.key) : 0;
   if (digit && (ctrl || e.altKey || !searchEl.value)) {
@@ -1081,7 +1305,8 @@ document.addEventListener("keydown", (e) => {
       return;
     case "Enter":
       e.preventDefault();
-      runPrimary(selected);
+      if (flat.length) runPrimary(selected);
+      else fallbackAction?.();
       return;
     case "Escape":
       e.preventDefault();
@@ -1556,6 +1781,7 @@ function onHidden() {
   if (!settingsPanel.hidden) closeSettings();
   statsPanel.hidden = true;
   closePopover();
+  closePreview();
   if (pendingUndo) clearUndo();
   addingCustom = false;
   searchEl.value = "";

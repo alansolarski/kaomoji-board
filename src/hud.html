@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>kaomoji hud</title>
+    <!-- The "Copied" pill shown after the board hides. Kept self-contained
+         so this window loads nothing else. -->
+    <style>
+      :root {
+        --bg: #fbfaff;
+        --ink: #26222f;
+        --ink-soft: #6f6a7d;
+        --line: rgba(38, 34, 47, 0.1);
+        --accent: #7a5af8;
+      }
+      :root.dark {
+        --bg: #1c1a24;
+        --ink: #f1eff7;
+        --ink-soft: #a29eae;
+        --line: rgba(255, 255, 255, 0.1);
+        --accent: #a78bfa;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font: 500 13px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      }
+      .pill {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        max-width: 380px;
+        padding: 9px 16px 9px 12px;
+        border-radius: 12px;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+        color: var(--ink);
+        opacity: 0;
+      }
+      .pill.show {
+        animation: hud 1250ms ease both;
+      }
+      .check {
+        color: var(--accent);
+        flex: none;
+        display: flex;
+      }
+      .face {
+        color: var(--ink-soft);
+        font-family: "Segoe UI", "Yu Gothic UI", "Meiryo UI", "Segoe UI Symbol", sans-serif;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      @keyframes hud {
+        0% { opacity: 0; transform: translateY(6px) scale(0.97); }
+        14% { opacity: 1; transform: none; }
+        80% { opacity: 1; transform: none; }
+        100% { opacity: 0; transform: translateY(2px); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pill" id="pill">
+      <span class="check">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+      </span>
+      <span>Copied</span>
+      <span class="face" id="face"></span>
+    </div>
+    <script>
+      const pill = document.getElementById("pill");
+      window.__TAURI__.event.listen("hud", ({ payload }) => {
+        document.documentElement.classList.toggle("dark", payload.dark);
+        document.getElementById("face").textContent = payload.text;
+        // Restart the fade even if the last one is still running.
+        pill.classList.remove("show");
+        void pill.offsetWidth;
+        pill.classList.add("show");
+      });
+    </script>
+  </body>
+</html>

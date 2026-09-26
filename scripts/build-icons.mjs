@@ -25,6 +25,9 @@ const MAPPING = {
   "ui:forget": "history",
   "ui:add": "plus",
   "ui:delete": "trash-2",
+  "ui:move-left": "arrow-left",
+  "ui:move-right": "arrow-right",
+  "ui:preview": "scan-eye",
 
   all: "layout-grid",
   frequent: "clock",

@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capabilities for the main kaomoji board window",
-  "windows": ["main"],
+  "windows": ["main", "hud"],
   "permissions": [
     "core:event:default",
     "clipboard-manager:allow-write-text"

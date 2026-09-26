@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings as EnigoSettings};
@@ -220,6 +220,88 @@ fn paste_kaomoji(app: tauri::AppHandle, window: WebviewWindow, text: String) -> 
         }
     });
     Ok(())
+}
+
+// ---------- "Copied" HUD ----------
+
+const HUD_LABEL: &str = "hud";
+const HUD_MS: u64 = 1300;
+
+/// Bumped on every HUD; a pending hide only fires if no newer HUD replaced it.
+static HUD_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// A small click-through window that confirms a copy after the board hides.
+/// Created once, hidden, so showing it later costs nothing.
+fn create_hud(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let hud = tauri::WebviewWindowBuilder::new(app, HUD_LABEL, tauri::WebviewUrl::App("hud.html".into()))
+        .title("kaomoji hud")
+        .inner_size(420.0, 72.0)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .focusable(false)
+        .visible(false)
+        .build()?;
+    hud.set_ignore_cursor_events(true)?;
+    Ok(())
+}
+
+/// Shows and hides the HUD straight through Win32: tao's show() activates
+/// the window, which would pull focus away from the app the user returned to.
+#[cfg(windows)]
+fn set_hud_visible(hwnd: isize, visible: bool) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE,
+    };
+    let hwnd = HWND(hwnd as *mut _);
+    unsafe {
+        if visible {
+            let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        } else {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+}
+
+#[tauri::command]
+fn show_hud(app: tauri::AppHandle, text: String, dark: bool) {
+    let (Some(hud), Some(main)) = (app.get_webview_window(HUD_LABEL), app.get_webview_window("main")) else {
+        return;
+    };
+    // Bottom center of the monitor the board was on, just above the taskbar.
+    if let Some(monitor) = main.current_monitor().ok().flatten() {
+        let area = *monitor.work_area();
+        let place = |hud: &WebviewWindow| {
+            let size = hud.outer_size().unwrap_or_default();
+            let x = area.position.x + (area.size.width as i32 - size.width as i32) / 2;
+            let y = area.position.y + area.size.height as i32 - size.height as i32 - (40.0 * monitor.scale_factor()) as i32;
+            let _ = hud.set_position(tauri::PhysicalPosition::new(x, y));
+        };
+        // Twice: moving onto a monitor with a different scale resizes it.
+        place(&hud);
+        place(&hud);
+    }
+    let _ = app.emit_to(HUD_LABEL, "hud", serde_json::json!({ "text": text, "dark": dark }));
+
+    #[cfg(windows)]
+    if let Ok(hwnd) = hud.hwnd() {
+        let hwnd = hwnd.0 as isize;
+        let generation = HUD_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        std::thread::spawn(move || {
+            // Give the page a moment to draw the new text before it appears.
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            set_hud_visible(hwnd, true);
+            std::thread::sleep(std::time::Duration::from_millis(HUD_MS));
+            if HUD_GENERATION.load(Ordering::SeqCst) == generation {
+                set_hud_visible(hwnd, false);
+            }
+        });
+    }
 }
 
 /// Where data.json lives: the chosen sync folder, or the app data dir.
@@ -457,7 +539,8 @@ pub fn run() {
             set_autostart,
             set_hotkey,
             pause_hotkey,
-            resume_hotkey
+            resume_hotkey,
+            show_hud
         ])
         .setup(|app| {
             let handle = app.handle();
@@ -507,6 +590,10 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            if let Err(e) = create_hud(handle) {
+                eprintln!("could not create the HUD window: {e}");
+            }
 
             if let Some(window) = app.get_webview_window("main") {
                 if let (Some(x), Some(y)) = (cfg.window_x, cfg.window_y) {
