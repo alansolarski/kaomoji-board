@@ -5,7 +5,7 @@
 export const categories = [
   {
     name: "Happy",
-    keywords: "happy joy glad yay smile excited grin cheerful",
+    keywords: "happy joy glad yay smile excited grin cheerful laugh laughing lol haha",
     items: [
       ["(๑˃ᴗ˂)ﻭ", "cheer fist"],
       ["＼(^o^)／", "hooray arms"],
@@ -81,7 +81,7 @@ export const categories = [
   },
   {
     name: "Sad",
-    keywords: "sad cry crying tears upset sob unhappy depressed",
+    keywords: "sad cry crying tears upset sob unhappy depressed heartbroken broken",
     items: [
       "(｡•́︿•̀｡)",
       ["(ಥ_ಥ)", "tears"],
@@ -245,7 +245,7 @@ export const categories = [
   },
   {
     name: "Mischief",
-    keywords: "mischief evil smirk sneaky smug devious",
+    keywords: "mischief evil smirk sneaky smug devious villain",
     items: [
       "(≖ᴗ≖✿)",
       "( ✧≖ ‿ ≖)",
@@ -325,7 +325,7 @@ export const categories = [
   },
   {
     name: "Sparkle",
-    keywords: "sparkle magic celebrate party star shine wand",
+    keywords: "sparkle sparkles sparkly magic wizard celebrate party star shine wand",
     items: [
       "☆*:.｡.o(≧▽≦)o.｡.:*☆",
       "(*＾▽＾)/",
@@ -364,7 +364,7 @@ export const categories = [
   },
   {
     name: "Food",
-    keywords: "food eat eating drink hungry yum tasty delicious snack",
+    keywords: "food eat eating drink drinks hungry yum tasty delicious snack coffee tea cheers",
     items: [
       "(っ˘ڡ˘ς)",
       ["( ˘▽˘)っ♨", "hot"],
@@ -402,7 +402,7 @@ export const categories = [
   },
   {
     name: "Thumbs Up",
-    keywords: "thumbs up ok okay good approve yes nice point peace",
+    keywords: "thumbs up ok okay good approve yes nice point pointing peace",
     items: [
       "(b ᵔ▽ᵔ)b",
       ["(๑•̀ㅂ•́)و✧", "determined"],
@@ -452,7 +452,7 @@ export const categories = [
   },
   {
     name: "Sleepy",
-    keywords: "sleepy sleep tired night bed nap zzz bored",
+    keywords: "sleepy sleep tired night bed nap zzz bored yawn",
     items: [
       "(-_-) zzZ",
       "(∪｡∪)｡｡｡zzz",

@@ -20,6 +20,7 @@ const settingsBackBtn = $("settingsBackBtn");
 const stayOpenToggle = $("stayOpenToggle");
 const autoPasteToggle = $("autoPasteToggle");
 const soundToggle = $("soundToggle");
+const markdownToggle = $("markdownToggle");
 const autostartToggle = $("autostartToggle");
 const themeSegmented = $("themeSegmented");
 const densitySegmented = $("densitySegmented");
@@ -60,7 +61,14 @@ function el(tag, className, text) {
 
 // ---------- persisted data (data.json via the backend) ----------
 
-const DEFAULT_PREFS = { stayOpen: false, autoPaste: false, sound: true, theme: "auto", density: "comfortable" };
+const DEFAULT_PREFS = {
+  stayOpen: false,
+  autoPaste: false,
+  markdownSafe: false,
+  sound: true,
+  theme: "auto",
+  density: "comfortable",
+};
 let data = normalize({});
 let dataLoaded = false;
 
@@ -879,13 +887,14 @@ async function useKaomoji(text, tile, mode) {
     faceEl.textContent = idleFace();
   }, 900);
 
+  const output = data.prefs.markdownSafe ? escapeMarkdown(text) : text;
   try {
     if (mode === "paste") {
-      await invoke("paste_kaomoji", { text });
+      await invoke("paste_kaomoji", { text: output });
       showHud("Pasted", text);
       return;
     }
-    await window.__TAURI__.clipboardManager.writeText(text);
+    await window.__TAURI__.clipboardManager.writeText(output);
   } catch (err) {
     console.error("copy failed", err);
     flashContext("Couldn't copy (｡•́︿•̀｡)", 2500);
@@ -898,6 +907,14 @@ async function useKaomoji(text, tile, mode) {
       showHud("Copied", text);
     }, 90);
   } else if (pendingCelebration) setTimeout(celebrate, 700);
+}
+
+// Discord (like most chat apps) reads * _ ~ ` | \ as Markdown, which eats
+// arms (¯\_(ツ)_/¯) and italicizes whatever sits between two (*^▽^*). A
+// backslash before each shows it as typed. A leading > # or - would start a
+// quote, heading or list.
+export function escapeMarkdown(text) {
+  return text.replace(/[\\*_~`|]/g, "\\$&").replace(/^[>#-]/, "\\$&");
 }
 
 // The board is gone by now, so a little pill above the taskbar confirms it.
@@ -1629,6 +1646,7 @@ function applyDensity(density) {
 function applyPrefs() {
   stayOpenToggle.checked = data.prefs.stayOpen;
   autoPasteToggle.checked = data.prefs.autoPaste;
+  markdownToggle.checked = data.prefs.markdownSafe;
   soundToggle.checked = data.prefs.sound;
   applyTheme(data.prefs.theme);
   applyDensity(data.prefs.density);
@@ -1655,6 +1673,7 @@ function bindPref(toggle, key) {
 bindPref(stayOpenToggle, "stayOpen");
 bindPref(autoPasteToggle, "autoPaste");
 bindPref(soundToggle, "sound");
+bindPref(markdownToggle, "markdownSafe");
 
 themeSegmented.addEventListener("click", (e) => {
   const btn = e.target.closest(".seg-btn");
