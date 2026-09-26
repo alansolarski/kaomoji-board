@@ -9,9 +9,23 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const lucide = join(root, "node_modules", "lucide-static");
 
-// Category name (or special section key) -> Lucide icon name.
-// Browse the set at https://lucide.dev/icons
+// App icon key -> Lucide icon name. Keys are category names, special
+// section keys, or UI keys prefixed "ui:". Browse at https://lucide.dev/icons
 const MAPPING = {
+  "ui:settings": "sliders-horizontal",
+  "ui:stats": "chart-column",
+  "ui:back": "arrow-left",
+  "ui:reset": "rotate-ccw",
+  "ui:chevron": "chevron-down",
+  "ui:search": "search",
+  "ui:copy": "copy",
+  "ui:paste": "clipboard-paste",
+  "ui:favorite": "heart",
+  "ui:unfavorite": "heart-off",
+  "ui:forget": "history",
+  "ui:add": "plus",
+  "ui:delete": "trash-2",
+
   all: "layout-grid",
   frequent: "clock",
   favorites: "heart", // drawn filled, see FILLED
@@ -73,9 +87,9 @@ ${entries.join("\n")}
 
 const FILLED = new Set(${JSON.stringify(FILLED)});
 
-/** An <svg> element for a category (by name) or "all" / "frequent" /
- * "favorites" / "custom". Unknown names get the grid. */
-export function categoryIcon(key, size = 15) {
+/** An <svg> element for an icon key: a category name, "all" / "frequent" /
+ * "favorites" / "custom", or a "ui:" key. Unknown keys get the grid. */
+export function icon(key, size = 15) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", size);
@@ -86,7 +100,7 @@ export function categoryIcon(key, size = 15) {
   svg.setAttribute("stroke-linecap", "round");
   svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("cat-icon");
+  svg.classList.add("icon");
   svg.innerHTML = paths[key] ?? paths.all;
   return svg;
 }

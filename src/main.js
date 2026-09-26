@@ -1,5 +1,5 @@
 import { categories as rawCategories } from "./kaomoji-data.js";
-import { categoryIcon } from "./icons.js";
+import { icon } from "./icons.js";
 
 const $ = (id) => document.getElementById(id);
 const appEl = $("app");
@@ -34,9 +34,16 @@ const dataDirResetBtn = $("dataDirResetBtn");
 
 const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
 
-const FACE_IDLE = "( ˘ω˘ )";
 const FACE_HAPPY = "(ﾉ◕ヮ◕)ﾉ";
 const FACE_SAD = "(｡•́︿•̀｡)";
+const FACE_CELEBRATE = "(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧";
+
+// The corner face's resting expression follows the time of day.
+function idleFace(hour = new Date().getHours()) {
+  if (hour >= 23 || hour < 5) return "(－ω－) zzZ";
+  if (hour < 9) return "( ˘▽˘)っ♨";
+  return "( ˘ω˘ )";
+}
 
 
 const HEART_SVG =
@@ -194,9 +201,11 @@ function recordUse(text) {
   data.usage[text] = { c: prev.c + 1, t: now };
 
   const stats = data.stats;
+  const firstToday = !stats.days[dayKey(now)];
   stats.counts[text] = (stats.counts[text] || 0) + 1;
   stats.days[dayKey(now)] = (stats.days[dayKey(now)] || 0) + 1;
   if (!stats.first) stats.first = { text, t: now };
+  pendingCelebration = milestoneReached(firstToday) ?? pendingCelebration;
 
   const keys = Object.keys(data.usage);
   if (keys.length > MAX_USAGE_ENTRIES) {
@@ -207,6 +216,39 @@ function recordUse(text) {
       .forEach((k) => delete data.usage[k]);
   }
   saveData();
+}
+
+// Round-number totals and streak lengths get a little celebration from the
+// face. Usually the board hides right after a copy, so it's shown the next
+// time it opens.
+const TOTAL_MILESTONES = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+const STREAK_MILESTONES = [3, 7, 14, 30, 50, 100, 200, 365];
+let pendingCelebration = null;
+
+function milestoneReached(firstToday) {
+  const total = Object.values(data.stats.counts).reduce((a, b) => a + b, 0);
+  if (TOTAL_MILESTONES.includes(total)) return `${total.toLocaleString()} kaomoji copied!`;
+  // Streaks only grow on the first copy of a day.
+  if (firstToday) {
+    const { current } = streaks(data.stats.days);
+    if (STREAK_MILESTONES.includes(current)) return `${current}-day streak!`;
+  }
+  return null;
+}
+
+function celebrate() {
+  if (!pendingCelebration) return;
+  const message = pendingCelebration;
+  pendingCelebration = null;
+  clearTimeout(faceTimer);
+  faceEl.textContent = FACE_CELEBRATE;
+  faceEl.classList.add("celebrate");
+  flashContext(message, 3200);
+  faceTimer = setTimeout(() => {
+    faceTimer = null;
+    faceEl.textContent = idleFace();
+    faceEl.classList.remove("celebrate");
+  }, 3200);
 }
 
 function frequentItems() {
@@ -318,7 +360,7 @@ function setCategory(id) {
   categoryFilter = id;
   const section = allSections().find((s) => s.id === id);
   categoryLabel.textContent = section ? section.label : "All Categories";
-  categoryIconSlot.replaceChildren(categoryIcon(section ? section.icon : "all"));
+  categoryIconSlot.replaceChildren(icon(section ? section.icon : "all"));
   contentEl.scrollTop = 0;
   render();
 }
@@ -358,6 +400,7 @@ function render({ keepSelection = false } = {}) {
   }
 
   applySpans();
+  watchStuckHeadings();
 
   flat.slice(0, 9).forEach((tile, i) => (tile.dataset.n = String(i + 1)));
 
@@ -372,7 +415,24 @@ function render({ keepSelection = false } = {}) {
   selected = -1;
   select(next, false);
 
-  if (!faceTimer) faceEl.textContent = query && !flat.length ? FACE_SAD : FACE_IDLE;
+  if (!faceTimer) faceEl.textContent = query && !flat.length ? FACE_SAD : idleFace();
+}
+
+// Section headings stick at top: -1px, so a pinned one is 1px out of view
+// and no longer fully visible; that's when it gets the "stuck" backing.
+const stuckObserver = new IntersectionObserver(
+  (entries) => {
+    for (const entry of entries) {
+      const pinned = entry.intersectionRatio < 1 && entry.boundingClientRect.top < entry.rootBounds.top + 1;
+      entry.target.classList.toggle("stuck", pinned);
+    }
+  },
+  { root: contentEl, threshold: [1] }
+);
+
+function watchStuckHeadings() {
+  stuckObserver.disconnect();
+  contentEl.querySelectorAll(".section-head").forEach((head) => stuckObserver.observe(head));
 }
 
 // Long kaomoji get two cells, and the few that still don't fit get the whole
@@ -468,7 +528,8 @@ function buildTile(text, sec, indexInSection, favorites) {
 
 function buildAddTile() {
   if (!addingCustom) {
-    const btn = el("button", "tile add", "+ Add your own");
+    const btn = el("button", "tile add");
+    btn.append(icon("ui:add", 14), el("span", "", "Add your own"));
     btn.addEventListener("click", startAddingCustom);
     return btn;
   }
@@ -648,7 +709,7 @@ async function useKaomoji(text, tile, mode) {
   clearTimeout(faceTimer);
   faceTimer = setTimeout(() => {
     faceTimer = null;
-    faceEl.textContent = FACE_IDLE;
+    faceEl.textContent = idleFace();
   }, 900);
 
   try {
@@ -664,6 +725,7 @@ async function useKaomoji(text, tile, mode) {
   }
   flashContext("Copied to clipboard");
   if (!data.prefs.stayOpen) setTimeout(hideWindow, 90);
+  else if (pendingCelebration) setTimeout(celebrate, 700);
 }
 
 function hideWindow() {
@@ -749,38 +811,65 @@ let popoverKind = null;
 let popoverItems = [];
 let popoverActive = -1;
 
-// items: [{ label, keys?, dot?, checked?, danger?, run }] | "sep" | { title }
-function openPopover(kind, items, place) {
+// items: [{ label, icon?, keys?, checked?, danger?, run }] | "sep" | { title }
+// With `searchable`, a field at the top filters items by label as you type.
+function openPopover(kind, items, place, { searchable = false } = {}) {
   popoverKind = kind;
-  popoverItems = [];
   popoverEl.innerHTML = "";
+  popoverEl.dataset.place = typeof place === "string" ? place : "cursor";
 
-  for (const item of items) {
-    if (item === "sep") {
-      popoverEl.append(el("div", "popover-sep"));
-      continue;
-    }
-    if (item.title) {
-      popoverEl.append(el("div", "popover-title", item.title));
-      continue;
-    }
-    const btn = el("button", "popover-item" + (item.danger ? " danger" : ""));
-    if (item.icon) btn.append(categoryIcon(item.icon));
-    btn.append(el("span", "label", item.label));
-    if (item.checked) btn.append(el("span", "check", "✓"));
-    if (item.keys) {
-      const keys = el("span", "keys");
-      item.keys.forEach((k) => keys.append(el("kbd", "", k)));
-      btn.append(keys);
-    }
-    const index = popoverItems.length;
-    btn.addEventListener("mousemove", (e) => {
-      if (pointerMoved(e)) setPopoverActive(index);
-    });
-    btn.addEventListener("click", () => runPopoverItem(index));
-    popoverEl.append(btn);
-    popoverItems.push({ ...item, btn });
+  let searchInput = null;
+  if (searchable) {
+    const wrap = el("div", "popover-search");
+    searchInput = el("input");
+    searchInput.placeholder = "Search…";
+    searchInput.spellcheck = false;
+    wrap.append(icon("ui:search", 13), searchInput);
+    popoverEl.append(wrap);
   }
+  const list = el("div", "popover-list");
+  popoverEl.append(list);
+
+  const renderItems = (filter = "") => {
+    const query = filter.trim().toLowerCase();
+    list.innerHTML = "";
+    popoverItems = [];
+    popoverActive = -1;
+    for (const item of items) {
+      // Headings and separators only make sense in the unfiltered list.
+      if (item === "sep") {
+        if (!query) list.append(el("div", "popover-sep"));
+        continue;
+      }
+      if (item.title) {
+        if (!query) list.append(el("div", "popover-title", item.title));
+        continue;
+      }
+      if (query && !item.label.toLowerCase().includes(query)) continue;
+
+      const btn = el("button", "popover-item" + (item.danger ? " danger" : ""));
+      if (item.icon) btn.append(icon(item.icon));
+      btn.append(el("span", "label", item.label));
+      if (item.checked) btn.append(el("span", "check", "✓"));
+      if (item.keys) {
+        const keys = el("span", "keys");
+        item.keys.forEach((k) => keys.append(el("kbd", "", k)));
+        btn.append(keys);
+      }
+      const index = popoverItems.length;
+      btn.addEventListener("mousemove", (e) => {
+        if (pointerMoved(e)) setPopoverActive(index);
+      });
+      btn.addEventListener("click", () => runPopoverItem(index));
+      list.append(btn);
+      popoverItems.push({ ...item, btn });
+    }
+    if (!popoverItems.length) list.append(el("div", "popover-empty", "No matches"));
+    const checkedIndex = popoverItems.findIndex((i) => i.checked);
+    setPopoverActive(!query && checkedIndex >= 0 ? checkedIndex : 0);
+  };
+  renderItems();
+  searchInput?.addEventListener("input", () => renderItems(searchInput.value));
 
   popoverEl.hidden = false;
   const appW = appEl.clientWidth;
@@ -804,13 +893,21 @@ function openPopover(kind, items, place) {
   popoverEl.style.left = `${Math.max(6, Math.min(x, appW - w - 6))}px`;
   popoverEl.style.top = `${Math.max(6, Math.min(y, appH - h - 6))}px`;
 
-  const checkedIndex = popoverItems.findIndex((i) => i.checked);
-  setPopoverActive(checkedIndex >= 0 ? checkedIndex : 0);
+  // Restart the entrance animation even if it was already open.
+  popoverEl.classList.remove("opening");
+  void popoverEl.offsetWidth;
+  popoverEl.classList.add("opening");
+
   categoryBtn.classList.toggle("open", kind === "category");
+  searchInput?.focus();
 }
 
 function setPopoverActive(index) {
   popoverItems[popoverActive]?.btn.classList.remove("active");
+  if (!popoverItems.length) {
+    popoverActive = -1;
+    return;
+  }
   popoverActive = (index + popoverItems.length) % popoverItems.length;
   const item = popoverItems[popoverActive];
   item?.btn.classList.add("active");
@@ -826,19 +923,22 @@ function runPopoverItem(index) {
 function closePopover() {
   if (!popoverKind) return;
   popoverKind = null;
+  // Typing was going into the popover's search; hand focus back.
+  if (popoverEl.contains(document.activeElement)) searchEl.focus();
   popoverEl.hidden = true;
   categoryBtn.classList.remove("open");
 }
 
 function openActions(place = "actions") {
   const tile = flat[selected];
+  const addCustom = { label: "Add Custom Kaomoji…", icon: "ui:add", run: startAddingCustom };
   if (!tile) {
-    openPopover("actions", [{ label: "Add Custom Kaomoji…", run: startAddingCustom }], place);
+    openPopover("actions", [addCustom], place);
     return;
   }
   const text = tile.dataset.text;
-  const paste = { label: "Paste into Last App", run: () => useKaomoji(text, tile, "paste") };
-  const copy = { label: "Copy to Clipboard", run: () => useKaomoji(text, tile, "copy") };
+  const paste = { label: "Paste into Last App", icon: "ui:paste", run: () => useKaomoji(text, tile, "paste") };
+  const copy = { label: "Copy to Clipboard", icon: "ui:copy", run: () => useKaomoji(text, tile, "copy") };
   const [primary, secondary] = data.prefs.autoPaste ? [paste, copy] : [copy, paste];
   const isFav = data.favorites.includes(text);
 
@@ -847,11 +947,20 @@ function openActions(place = "actions") {
     { ...primary, keys: ["↵"] },
     { ...secondary, keys: ["Ctrl", "↵"] },
     "sep",
-    { label: isFav ? "Remove from Favorites" : "Add to Favorites", keys: ["Ctrl", "D"], run: () => toggleFavorite(text) },
+    {
+      label: isFav ? "Remove from Favorites" : "Add to Favorites",
+      icon: isFav ? "ui:unfavorite" : "ui:favorite",
+      keys: ["Ctrl", "D"],
+      run: () => toggleFavorite(text),
+    },
   ];
-  if (tile.dataset.kind === "frequent") items.push({ label: "Remove from Frequently Used", run: () => forgetUsage(text) });
-  items.push("sep", { label: "Add Custom Kaomoji…", run: startAddingCustom }, { label: "Your Stats…", run: openStats });
-  if (tile.dataset.kind === "custom") items.push({ label: "Delete", danger: true, run: () => deleteCustom(text) });
+  if (tile.dataset.kind === "frequent") {
+    items.push({ label: "Remove from Frequently Used", icon: "ui:forget", run: () => forgetUsage(text) });
+  }
+  items.push("sep", addCustom, { label: "Your Stats…", icon: "ui:stats", run: openStats });
+  if (tile.dataset.kind === "custom") {
+    items.push({ label: "Delete", icon: "ui:delete", danger: true, run: () => deleteCustom(text) });
+  }
   openPopover("actions", items, place);
 }
 
@@ -866,7 +975,7 @@ function openCategories() {
       run: () => setCategory(s.id),
     })),
   ];
-  openPopover("category", items, "category");
+  openPopover("category", items, "category", { searchable: true });
 }
 
 categoryBtn.addEventListener("click", () => (popoverKind === "category" ? closePopover() : openCategories()));
@@ -1037,6 +1146,52 @@ function streaks(days) {
   return { current, longest, activeDays: active.size };
 }
 
+// GitHub-style grid: one column per week (oldest first), Monday at the
+// top, ending with the current week. Shades are relative to the busiest day
+// shown.
+const HEATMAP_WEEKS = 26;
+
+function renderHeatmap(card, days) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const weekday = (today.getDay() + 6) % 7; // Monday = 0
+  const start = new Date(today);
+  start.setDate(start.getDate() - weekday - (HEATMAP_WEEKS - 1) * 7);
+
+  const cells = [];
+  for (let i = 0; i < HEATMAP_WEEKS * 7; i++) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    cells.push({ date, count: date > today ? null : days[dayKey(date.getTime())] || 0 });
+  }
+  const busiest = Math.max(1, ...cells.map((c) => c.count ?? 0));
+
+  const grid = el("div", "heatmap");
+  for (const { date, count } of cells) {
+    const cell = el("span", "heat-cell");
+    if (count === null) {
+      cell.classList.add("future");
+    } else {
+      cell.dataset.level = count ? String(Math.min(4, Math.ceil((count / busiest) * 4))) : "0";
+      cell.title = `${count} ${count === 1 ? "copy" : "copies"} on ${formatDate(date)}`;
+    }
+    grid.append(cell);
+  }
+
+  const legend = el("div", "heat-legend");
+  legend.append(el("span", "", "Last 6 months"), el("span", "spacer"), el("span", "", "Less"));
+  for (let level = 0; level <= 4; level++) {
+    const swatch = el("span", "heat-cell");
+    swatch.dataset.level = String(level);
+    legend.append(swatch);
+  }
+  legend.append(el("span", "", "More"));
+
+  const wrap = el("div", "heatmap-wrap");
+  wrap.append(grid, legend);
+  card.append(wrap);
+}
+
 function renderStats() {
   const { counts, days, since, first } = data.stats;
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -1075,6 +1230,8 @@ function renderStats() {
     cards.append(card);
   }
   statsBody.append(cards);
+
+  renderHeatmap(group("Activity"), days);
 
   const topCard = group("Most used");
   const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -1407,15 +1564,40 @@ function onHidden() {
 
 async function onShown() {
   setTimeout(() => searchEl.focus(), 0);
+  // The time of day may have changed since it hid.
+  if (!faceTimer) faceEl.textContent = idleFace();
   // Only redraw if the data changed while hidden (e.g. from a synced folder).
   if (await loadData()) {
     applyPrefs();
     render();
   }
+  if (pendingCelebration) setTimeout(celebrate, 250);
   if (Date.now() - lastUpdateCheck > UPDATE_CHECK_INTERVAL_MS) checkForUpdate();
 }
 
+// Fills every [data-icon] placeholder in the page with its icon.
+function hydrateIcons() {
+  for (const slot of document.querySelectorAll("[data-icon]")) {
+    slot.replaceChildren(icon(slot.dataset.icon, Number(slot.dataset.size) || 15));
+  }
+}
+
+// Scrollbars stay hidden until you scroll or hover (see .autohide in CSS).
+for (const scroller of document.querySelectorAll(".content, .settings-body")) {
+  let timer = null;
+  scroller.addEventListener(
+    "scroll",
+    () => {
+      scroller.classList.add("scrolling");
+      clearTimeout(timer);
+      timer = setTimeout(() => scroller.classList.remove("scrolling"), 900);
+    },
+    { passive: true }
+  );
+}
+
 (async () => {
+  hydrateIcons();
   window.__TAURI__.event.listen("shown", onShown);
   window.__TAURI__.event.listen("hidden", onHidden);
   await loadData({ initial: true });

@@ -19,21 +19,13 @@
         <button class="dropdown-btn" id="categoryBtn" title="Filter by category (Ctrl+P)">
           <span class="cat-icon-slot" id="categoryIcon"></span>
           <span id="categoryLabel">All Categories</span>
-          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4.5 6.5 8 10l3.5-3.5" />
-          </svg>
+          <span class="chevron" data-icon="ui:chevron" data-size="13"></span>
         </button>
         <button class="icon-btn" id="statsBtn" title="Your stats" aria-label="Your stats">
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-            <path d="M3 13V9M8 13V3M13 13V6" />
-          </svg>
+          <span data-icon="ui:stats"></span>
         </button>
         <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-            <path d="M2 4.5h6.5M12.5 4.5H14M2 11.5h1.5M7.5 11.5H14" />
-            <circle cx="10.5" cy="4.5" r="1.75" />
-            <circle cx="5.5" cy="11.5" r="1.75" />
-          </svg>
+          <span data-icon="ui:settings"></span>
         </button>
       </header>
 
@@ -62,9 +54,7 @@
       <div class="settings-panel" id="statsPanel" hidden>
         <header class="topbar settings-top">
           <button class="icon-btn back-btn" id="statsBackBtn" title="Back (Esc)" aria-label="Back">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M13 8H3M7 4 3 8l4 4" />
-            </svg>
+            <span data-icon="ui:back"></span>
           </button>
           <span class="settings-title">Your Kaomoji</span>
         </header>
@@ -74,9 +64,7 @@
       <div class="settings-panel" id="settingsPanel" hidden>
         <header class="topbar settings-top">
           <button class="icon-btn back-btn" id="settingsBackBtn" title="Back (Esc)" aria-label="Back">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M13 8H3M7 4 3 8l4 4" />
-            </svg>
+            <span data-icon="ui:back"></span>
           </button>
           <span class="settings-title">Settings</span>
         </header>
@@ -100,10 +88,7 @@
               <span class="row-buttons">
                 <button class="hotkey-btn" id="hotkeyBtn" title="Click, then press a new shortcut">…</button>
                 <button class="icon-btn reset-btn" id="hotkeyResetBtn" title="Reset to Ctrl+Alt+K" aria-label="Reset hotkey" hidden>
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                    <path d="M3 3v5h5" />
-                  </svg>
+                  <span data-icon="ui:reset" data-size="14"></span>
                 </button>
               </span>
             </div>

@@ -80,6 +80,17 @@ input {
   color: inherit;
 }
 
+/* One consistent focus ring, only for keyboard focus. Text fields don't get
+   one: the caret already shows where you are. */
+:focus {
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 kbd {
   display: inline-grid;
   place-items: center;
@@ -106,13 +117,13 @@ kbd {
   overflow: hidden;
 }
 
-.cat-icon {
+.icon {
   flex-shrink: 0;
   color: var(--ink-soft);
 }
 
-.popover-item.active .cat-icon,
-.dropdown-btn .cat-icon {
+.popover-item.active .icon,
+.dropdown-btn .icon {
   color: var(--ink);
 }
 
@@ -167,12 +178,13 @@ kbd {
   background: var(--tile-hover);
 }
 
-.dropdown-btn > svg {
-  color: var(--ink-soft);
-}
-
+[data-icon],
 .cat-icon-slot {
   display: flex;
+}
+
+.dropdown-btn .chevron .icon {
+  color: var(--ink-soft);
 }
 
 .icon-btn {
@@ -216,7 +228,9 @@ kbd {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 2px 14px 14px;
+  padding: 0 14px 14px;
+  /* Keep keyboard-selected tiles clear of the sticky section heading. */
+  scroll-padding-top: 36px;
 }
 
 .content::-webkit-scrollbar,
@@ -224,22 +238,46 @@ kbd {
   width: 8px;
 }
 
+/* Scrollbars stay out of the way until you scroll or hover. */
 .content::-webkit-scrollbar-thumb,
 .settings-body::-webkit-scrollbar-thumb {
-  background: var(--line);
+  background-color: transparent;
   border: 2px solid transparent;
   background-clip: padding-box;
   border-radius: 999px;
 }
 
+.content:hover::-webkit-scrollbar-thumb,
+.content.scrolling::-webkit-scrollbar-thumb,
+.settings-body:hover::-webkit-scrollbar-thumb,
+.settings-body.scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--line);
+}
+
+/* Section headings stick to the top while you scroll through them. They
+   span the content's side padding so tiles don't peek out beside them. */
 .section-head {
+  position: sticky;
+  /* -1px so a stuck heading pokes out of view, which is how JS spots it. */
+  top: -1px;
+  z-index: 2;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin: 12px 2px 8px;
+  margin: 4px -14px 4px;
+  padding: 8px 16px 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-soft);
+  transition: background 0.12s ease;
+}
+
+/* Only a heading that's actually pinned gets a backing to hide the tiles
+   scrolling under it. */
+.section-head.stuck {
+  background: color-mix(in srgb, var(--surface-solid) 90%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 1px 0 var(--line);
 }
 
 .section-head .count {
@@ -406,7 +444,15 @@ kbd {
   outline-offset: 2px;
 }
 
+/* No badge or heart here, so no side padding for them, and two cells so
+   the label always fits. */
 .tile.add {
+  grid-column: span 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
   border: 1.5px dashed var(--line);
   background: none;
   color: var(--ink-soft);
@@ -458,11 +504,23 @@ kbd {
 }
 
 .app-icon {
+  display: inline-block;
   font-size: 12px;
   font-weight: 700;
   color: var(--accent);
   white-space: nowrap;
   cursor: grab;
+}
+
+.app-icon.celebrate {
+  animation: celebrate 0.6s ease-out;
+}
+
+@keyframes celebrate {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.18) rotate(-4deg); }
+  60% { transform: scale(0.96) rotate(3deg); }
+  100% { transform: scale(1); }
 }
 
 .context {
@@ -536,12 +594,14 @@ kbd {
 
 /* ---------- popovers (actions, categories) ---------- */
 
+/* The search field (if any) stays put while the list scrolls. */
 .popover {
   position: absolute;
   z-index: 20;
+  display: flex;
+  flex-direction: column;
   width: 240px;
   max-height: 300px;
-  overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -553,11 +613,65 @@ kbd {
   display: none;
 }
 
-.popover::-webkit-scrollbar {
+/* Slides in from its anchor: down from the dropdown, up from the bar. */
+.popover.opening {
+  animation: popover-in 0.12s ease-out;
+}
+
+.popover.opening[data-place="actions"] {
+  animation-name: popover-up;
+}
+
+@keyframes popover-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
+
+@keyframes popover-up {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+}
+
+.popover-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.popover-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  height: 32px;
+  margin-bottom: 5px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+
+.popover-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  font-size: 12.5px;
+  caret-color: var(--accent);
+}
+
+.popover-search input::placeholder {
+  color: var(--ink-soft);
+}
+
+.popover-empty {
+  padding: 10px 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.popover-list::-webkit-scrollbar {
   width: 8px;
 }
 
-.popover::-webkit-scrollbar-thumb {
+.popover-list::-webkit-scrollbar-thumb {
   background: var(--line);
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -620,13 +734,24 @@ kbd {
 /* ---------- toggles ---------- */
 
 .toggle {
+  position: relative;
   display: inline-flex;
   align-items: center;
   cursor: pointer;
 }
 
+/* Visually hidden but still focusable, so toggles work from the keyboard. */
 .toggle input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle input:focus-visible + .toggle-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .toggle-track {
@@ -985,6 +1110,50 @@ div.setting-row {
   font-size: 12px;
   color: var(--ink-soft);
   text-align: right;
+}
+
+.heatmap-wrap {
+  padding: 14px 16px 12px;
+}
+
+.heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, auto);
+  grid-template-columns: repeat(26, 1fr);
+  gap: 3px;
+}
+
+.heat-cell {
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: var(--keycap);
+}
+
+.heat-cell.future {
+  visibility: hidden;
+}
+
+.heat-cell[data-level="1"] { background: color-mix(in srgb, var(--accent) 30%, var(--keycap)); }
+.heat-cell[data-level="2"] { background: color-mix(in srgb, var(--accent) 55%, var(--keycap)); }
+.heat-cell[data-level="3"] { background: color-mix(in srgb, var(--accent) 78%, var(--keycap)); }
+.heat-cell[data-level="4"] { background: var(--accent); }
+
+.heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.heat-legend .spacer {
+  flex: 1;
+}
+
+.heat-legend .heat-cell {
+  width: 10px;
 }
 
 /* Fun facts reuse .setting-row for layout. */
