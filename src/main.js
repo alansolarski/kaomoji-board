@@ -20,7 +20,7 @@ const settingsBackBtn = $("settingsBackBtn");
 const stayOpenToggle = $("stayOpenToggle");
 const autoPasteToggle = $("autoPasteToggle");
 const soundToggle = $("soundToggle");
-const markdownToggle = $("markdownToggle");
+const markdownSegmented = $("markdownSegmented");
 const autostartToggle = $("autostartToggle");
 const themeSegmented = $("themeSegmented");
 const densitySegmented = $("densitySegmented");
@@ -64,7 +64,7 @@ function el(tag, className, text) {
 const DEFAULT_PREFS = {
   stayOpen: false,
   autoPaste: false,
-  markdownSafe: false,
+  markdown: "chat", // escape Markdown: "off" | "chat" (only in chat apps) | "always"
   sound: true,
   theme: "auto",
   density: "comfortable",
@@ -887,7 +887,8 @@ async function useKaomoji(text, tile, mode) {
     faceEl.textContent = idleFace();
   }, 900);
 
-  const output = data.prefs.markdownSafe ? escapeMarkdown(text) : text;
+  const md = data.prefs.markdown;
+  const output = md === "always" || (md === "chat" && fromMarkdownApp) ? escapeMarkdown(text) : text;
   try {
     if (mode === "paste") {
       await invoke("paste_kaomoji", { text: output });
@@ -908,6 +909,10 @@ async function useKaomoji(text, tile, mode) {
     }, 90);
   } else if (pendingCelebration) setTimeout(celebrate, 700);
 }
+
+// Set by the backend each time the board opens: whether the app it was
+// opened from is a chat app that reads Markdown (Discord, Slack, …).
+let fromMarkdownApp = false;
 
 // Discord (like most chat apps) reads * _ ~ ` | \ as Markdown, which eats
 // arms (¯\_(ツ)_/¯) and italicizes whatever sits between two (*^▽^*). A
@@ -1646,7 +1651,7 @@ function applyDensity(density) {
 function applyPrefs() {
   stayOpenToggle.checked = data.prefs.stayOpen;
   autoPasteToggle.checked = data.prefs.autoPaste;
-  markdownToggle.checked = data.prefs.markdownSafe;
+  applyMarkdownPref(data.prefs.markdown);
   soundToggle.checked = data.prefs.sound;
   applyTheme(data.prefs.theme);
   applyDensity(data.prefs.density);
@@ -1673,7 +1678,20 @@ function bindPref(toggle, key) {
 bindPref(stayOpenToggle, "stayOpen");
 bindPref(autoPasteToggle, "autoPaste");
 bindPref(soundToggle, "sound");
-bindPref(markdownToggle, "markdownSafe");
+
+function applyMarkdownPref(mode) {
+  for (const btn of markdownSegmented.children) {
+    btn.classList.toggle("active", btn.dataset.markdown === mode);
+  }
+}
+
+markdownSegmented.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-markdown]");
+  if (!btn) return;
+  data.prefs.markdown = btn.dataset.markdown;
+  applyMarkdownPref(data.prefs.markdown);
+  saveData();
+});
 
 themeSegmented.addEventListener("click", (e) => {
   const btn = e.target.closest(".seg-btn");
@@ -1902,7 +1920,8 @@ function onHidden() {
   setCategory("all");
 }
 
-async function onShown() {
+async function onShown(event) {
+  fromMarkdownApp = Boolean(event?.payload?.fromMarkdownApp);
   setTimeout(() => searchEl.focus(), 0);
   // The time of day may have changed since it hid.
   if (!faceTimer) faceEl.textContent = idleFace();

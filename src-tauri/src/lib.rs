@@ -154,8 +154,69 @@ fn compute_show_position(window: &WebviewWindow) -> Option<tauri::PhysicalPositi
     Some(tauri::PhysicalPosition::new(cx, cy))
 }
 
+/// Chat apps that read Markdown, where * _ ~ ` | \ in a kaomoji get eaten.
+const MARKDOWN_APPS: &[&str] = &[
+    "discord.exe", "discordptb.exe", "discordcanary.exe", "vesktop.exe", "legcord.exe",
+    "slack.exe", "ms-teams.exe", "teams.exe", "telegram.exe", "whatsapp.exe",
+    "whatsapp.root.exe", "element.exe", "mattermost.exe", "revolt.exe", "zulip.exe",
+];
+/// The same apps open in a browser, recognized by the tab's window title.
+const BROWSERS: &[&str] = &[
+    "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe",
+    "vivaldi.exe", "arc.exe", "zen.exe", "librewolf.exe", "floorp.exe",
+];
+const MARKDOWN_SITES: &[&str] = &["Discord", "Slack", "Microsoft Teams", "Telegram", "WhatsApp", "Element", "Mattermost"];
+
+/// Whether the board was last opened from one of those apps. Kept across
+/// re-shows, where the "previous" app would be the board itself.
+static FROM_MARKDOWN_APP: AtomicBool = AtomicBool::new(false);
+
+/// The app that has focus right now: its exe name (lowercase) and window title.
+#[cfg(windows)]
+fn foreground_app() -> Option<(String, String)> {
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() {
+            return None;
+        }
+        let mut title = [0u16; 512];
+        let len = GetWindowTextW(hwnd, &mut title).max(0) as usize;
+        let title = String::from_utf16_lossy(&title[..len]);
+
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut path = [0u16; 1024];
+        let mut size = path.len() as u32;
+        let found = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut size);
+        let _ = CloseHandle(process);
+        found.ok()?;
+        let path = String::from_utf16_lossy(&path[..size as usize]);
+        Some((path.rsplit('\\').next()?.to_lowercase(), title))
+    }
+}
+
+#[cfg(not(windows))]
+fn foreground_app() -> Option<(String, String)> {
+    None
+}
+
+fn is_markdown_app(exe: &str, title: &str) -> bool {
+    MARKDOWN_APPS.contains(&exe)
+        || (BROWSERS.contains(&exe) && MARKDOWN_SITES.iter().any(|site| title.contains(site)))
+}
+
 fn show_window(window: &WebviewWindow) {
     if !window.is_visible().unwrap_or(false) {
+        // Before the board takes focus, note where the user came from.
+        let from_markdown = foreground_app().is_some_and(|(exe, title)| is_markdown_app(&exe, &title));
+        FROM_MARKDOWN_APP.store(from_markdown, Ordering::SeqCst);
         if let Some(pos) = compute_show_position(window) {
             let _ = window.set_position(pos);
         }
@@ -164,7 +225,10 @@ fn show_window(window: &WebviewWindow) {
     let _ = window.show();
     let _ = window.set_focus();
     // Lets the frontend reset search/selection for a fresh peek.
-    let _ = window.emit("shown", ());
+    let _ = window.emit(
+        "shown",
+        serde_json::json!({ "fromMarkdownApp": FROM_MARKDOWN_APP.load(Ordering::SeqCst) }),
+    );
 }
 
 fn toggle_window(window: &WebviewWindow) {

@@ -120,16 +120,17 @@
               </span>
             </label>
 
-            <label class="setting-row">
+            <div class="setting-row">
               <span class="setting-text">
                 <span>Markdown-safe</span>
-                <span class="setting-hint">Escapes * _ ~ ` | \ so Discord and other chat apps show kaomoji exactly as they look here</span>
+                <span class="setting-hint">Escapes * _ ~ ` | \ so Discord, Slack, Teams and other chat apps show kaomoji exactly as they look here</span>
               </span>
-              <span class="toggle">
-                <input type="checkbox" id="markdownToggle" />
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </span>
-            </label>
+              <div class="segmented" id="markdownSegmented">
+                <button data-markdown="off" class="seg-btn">Off</button>
+                <button data-markdown="chat" class="seg-btn">Chat apps</button>
+                <button data-markdown="always" class="seg-btn">Always</button>
+              </div>
+            </div>
 
             <label class="setting-row">
               <span class="setting-text"><span>Copy sound</span></span>

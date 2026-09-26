@@ -58,6 +58,13 @@ const MAPPING = {
   Running: "footprints",
   Sleepy: "moon",
   Greetings: "hand",
+  Unimpressed: "thumbs-down",
+  "Sick & Dizzy": "thermometer",
+  Peeking: "eye",
+  Cool: "glasses",
+  Cheers: "beer",
+  Busy: "notebook-pen",
+  Money: "coins",
 };
 
 // Filled rather than outlined, to match the hearts on favorited tiles.
