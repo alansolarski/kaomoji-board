@@ -289,7 +289,7 @@ fn paste_kaomoji(app: tauri::AppHandle, window: WebviewWindow, text: String) -> 
 // ---------- "Copied" HUD ----------
 
 const HUD_LABEL: &str = "hud";
-const HUD_MS: u64 = 1300;
+const HUD_MS: u64 = 900;
 
 /// Bumped on every HUD; a pending hide only fires if no newer HUD replaced it.
 static HUD_GENERATION: AtomicU64 = AtomicU64::new(0);
