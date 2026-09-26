@@ -230,10 +230,12 @@ const HUD_MS: u64 = 1300;
 /// Bumped on every HUD; a pending hide only fires if no newer HUD replaced it.
 static HUD_GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// A small click-through window that confirms a copy after the board hides.
+/// A small window that confirms a copy or paste after the board hides.
 /// Created once, hidden, so showing it later costs nothing.
+/// Not click-through: tao does that with a layered window, which Windows
+/// then never draws. It's only up for a second, and can't take focus.
 fn create_hud(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let hud = tauri::WebviewWindowBuilder::new(app, HUD_LABEL, tauri::WebviewUrl::App("hud.html".into()))
+    tauri::WebviewWindowBuilder::new(app, HUD_LABEL, tauri::WebviewUrl::App("hud.html".into()))
         .title("kaomoji hud")
         .inner_size(420.0, 72.0)
         .decorations(false)
@@ -246,7 +248,6 @@ fn create_hud(app: &tauri::AppHandle) -> tauri::Result<()> {
         .focusable(false)
         .visible(false)
         .build()?;
-    hud.set_ignore_cursor_events(true)?;
     Ok(())
 }
 
@@ -269,7 +270,7 @@ fn set_hud_visible(hwnd: isize, visible: bool) {
 }
 
 #[tauri::command]
-fn show_hud(app: tauri::AppHandle, text: String, dark: bool) {
+fn show_hud(app: tauri::AppHandle, label: String, text: String, dark: bool) {
     let (Some(hud), Some(main)) = (app.get_webview_window(HUD_LABEL), app.get_webview_window("main")) else {
         return;
     };
@@ -286,7 +287,7 @@ fn show_hud(app: tauri::AppHandle, text: String, dark: bool) {
         place(&hud);
         place(&hud);
     }
-    let _ = app.emit_to(HUD_LABEL, "hud", serde_json::json!({ "text": text, "dark": dark }));
+    let _ = app.emit_to(HUD_LABEL, "hud", serde_json::json!({ "label": label, "text": text, "dark": dark }));
 
     #[cfg(windows)]
     if let Ok(hwnd) = hud.hwnd() {

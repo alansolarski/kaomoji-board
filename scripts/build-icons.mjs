@@ -28,6 +28,7 @@ const MAPPING = {
   "ui:move-left": "arrow-left",
   "ui:move-right": "arrow-right",
   "ui:preview": "scan-eye",
+  "ui:keywords": "tag",
 
   all: "layout-grid",
   frequent: "clock",

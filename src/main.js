@@ -90,6 +90,8 @@ function normalize(source) {
     version: 1,
     favorites: Array.isArray(source.favorites) ? source.favorites : [],
     custom: Array.isArray(source.custom) ? source.custom : [],
+    // Your own search keywords, for any kaomoji: { text: ["word", …] }.
+    tags: source.tags && typeof source.tags === "object" ? source.tags : {},
     usage,
     prefs: { ...DEFAULT_PREFS, ...(source.prefs || {}) },
     stats: normalizeStats(source.stats, usage),
@@ -168,11 +170,14 @@ function mergeData(mine, theirs) {
     const other = usage[text];
     usage[text] = other ? { c: Math.max(u.c, other.c), t: Math.max(u.t, other.t) } : u;
   }
+  const tags = { ...theirs.tags };
+  for (const [text, kws] of Object.entries(mine.tags)) tags[text] = union(tags[text] || [], kws);
   const firsts = [mine.stats.first, theirs.stats.first].filter(Boolean);
   return {
     version: 1,
     favorites: union(theirs.favorites, mine.favorites),
     custom: union(theirs.custom, mine.custom),
+    tags,
     usage,
     prefs: { ...mine.prefs },
     stats: {
@@ -279,7 +284,7 @@ function buildIndex() {
   const add = (text, keywords) => {
     let entry = byText.get(text);
     if (!entry) {
-      entry = { text, order: byText.size, keywords: new Set() };
+      entry = { text, order: byText.size, keywords: new Set(), yours: new Set() };
       byText.set(text, entry);
     }
     keywords.forEach((k) => entry.keywords.add(k));
@@ -289,12 +294,18 @@ function buildIndex() {
   }
   data.custom.forEach((t) => add(t, ["custom"]));
   data.favorites.forEach((t) => add(t, ["favorite", "favourite"]));
+  for (const [text, kws] of Object.entries(data.tags)) {
+    const entry = byText.get(text); // skip keywords left over from deleted kaomoji
+    if (entry) kws.forEach((k) => (entry.keywords.add(k), entry.yours.add(k)));
+  }
   return [...byText.values()];
 }
 
-// Returns [quality, keyword that matched]. 3 = exact keyword, 2 = keyword
-// prefix, 1 = appears in the kaomoji itself (no keyword).
+// Returns [quality, keyword that matched]. 4 = one of your own keywords,
+// exactly; 3 = exact keyword; 2 = keyword prefix; 1 = appears in the
+// kaomoji itself (no keyword).
 function matchQuality(entry, token) {
+  if (entry.yours.has(token)) return [4, token];
   let best = entry.text.toLowerCase().includes(token) ? 1 : 0;
   let matched = null;
   for (const kw of entry.keywords) {
@@ -439,7 +450,6 @@ function setCategory(id) {
 
 let flat = []; // every copyable tile, in visual order
 let selected = -1;
-let addingCustom = false;
 
 function render({ keepSelection = false } = {}) {
   const query = searchEl.value.trim();
@@ -600,66 +610,126 @@ function buildTile(text, sec, indexInSection, favorites) {
 }
 
 function buildAddTile() {
-  if (!addingCustom) {
-    const btn = el("button", "tile add");
-    btn.append(icon("ui:add", 14), el("span", "", "Add your own"));
-    btn.addEventListener("click", startAddingCustom);
-    return btn;
-  }
-
-  const input = el("input", "tile add-input");
-  input.placeholder = "Paste a kaomoji, then ↵";
-  input.spellcheck = false;
-  const finish = (save) => {
-    if (!addingCustom) return;
-    addingCustom = false;
-    const value = input.value.trim();
-    if (save && value && !data.custom.includes(value)) {
-      data.custom.push(value);
-      saveData();
-      flashContext("Added to Custom");
-    }
-    render({ keepSelection: true });
-    searchEl.focus();
-  };
-  input.addEventListener("keydown", (e) => {
-    e.stopPropagation();
-    if (e.key === "Enter") finish(true);
-    else if (e.key === "Escape") finish(false);
-  });
-  input.addEventListener("blur", () => finish(false));
-  setTimeout(() => input.focus(), 0);
-  return input;
+  const btn = el("button", "tile add");
+  btn.append(icon("ui:add", 14), el("span", "", "Add your own"));
+  btn.addEventListener("click", () => openEditor());
+  return btn;
 }
 
-// When a search finds nothing, offer to save what was typed (usually a
-// pasted kaomoji) as a custom one. Enter runs it, since there's no tile.
+// When a search finds nothing, offer to add a kaomoji that it would find.
+// Enter runs it, since there's no tile to select.
 let fallbackAction = null;
 
 function buildFallback(query) {
+  // Letters and spaces are keywords; anything else is probably a kaomoji
+  // pasted into the search.
+  const isWords = /^[\p{L}\p{N}\s,]+$/u.test(query);
   const btn = el("button", "tile fallback");
-  btn.append(icon("ui:add", 14), el("span", "fallback-label", `Add “${query}” to Custom`), el("kbd", "", "↵"));
-  fallbackAction = () => addCustomFromSearch(query);
+  const label = isWords ? `Add a kaomoji for “${query}”` : `Add “${query}” to Custom`;
+  btn.append(icon("ui:add", 14), el("span", "fallback-label", label), el("kbd", "", "↵"));
+  fallbackAction = () => openEditor(isWords ? { keywords: query } : { text: query });
   btn.addEventListener("click", fallbackAction);
   return btn;
 }
 
-function addCustomFromSearch(text) {
-  if (!data.custom.includes(text)) data.custom.push(text);
-  saveData();
-  searchEl.value = "";
-  setCategory("custom");
-  select(flat.findIndex((t) => t.dataset.text === text));
-  flashContext("Added to Custom");
+// ---------- keyword editor ----------
+
+// One small dialog for adding a custom kaomoji and for giving any kaomoji
+// your own search keywords.
+const editorEl = $("editor");
+let editor = null; // { text, isNew, textInput?, keywordsInput }
+
+function openEditor({ text = "", keywords = "", existing = false } = {}) {
+  closePopover();
+  closePreview();
+  const card = el("div", "overlay-card editor-card");
+  card.append(el("div", "editor-title", existing ? "Edit Keywords" : "Add Custom Kaomoji"));
+
+  let textInput = null;
+  if (existing) {
+    card.append(el("div", "editor-kaomoji kaomoji-font", text));
+  } else {
+    textInput = el("input", "editor-input kaomoji-font");
+    textInput.placeholder = "Paste or type a kaomoji";
+    textInput.value = text;
+    card.append(field("Kaomoji", textInput));
+  }
+
+  const keywordsInput = el("input", "editor-input");
+  keywordsInput.placeholder = "e.g. smug, lenny, gotcha";
+  keywordsInput.value = existing ? (data.tags[text] || []).join(", ") : keywords;
+  const builtIn = kaomojiInfo.get(text);
+  const hint = builtIn?.keywords.size
+    ? `Already found by: ${[...builtIn.keywords].join(", ")}`
+    : "Search finds it by these words";
+  card.append(field("Keywords", keywordsInput, hint));
+
+  const footer = el("div", "overlay-hint");
+  footer.append(hintKeys("Save", "↵"), hintKeys("Cancel", "Esc"));
+  card.append(footer);
+
+  for (const input of [textInput, keywordsInput].filter(Boolean)) {
+    input.spellcheck = false;
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") saveEditor();
+      else if (e.key === "Escape") closeEditor();
+    });
+  }
+
+  editor = { text, isNew: !existing, textInput, keywordsInput };
+  editorEl.replaceChildren(card);
+  editorEl.hidden = false;
+  // Start where the typing is still to do.
+  (textInput && !textInput.value ? textInput : keywordsInput).focus();
 }
 
-function startAddingCustom() {
-  addingCustom = true;
-  searchEl.value = "";
-  if (categoryFilter !== "all" && categoryFilter !== "custom") setCategory("custom");
-  render({ keepSelection: true });
-  contentEl.querySelector(".add-input")?.scrollIntoView({ block: "nearest" });
+function field(label, input, hint) {
+  const wrap = el("label", "editor-field");
+  wrap.append(el("span", "editor-label", label), input);
+  if (hint) wrap.append(el("span", "editor-hint", hint));
+  return wrap;
 }
+
+function hintKeys(label, ...caps) {
+  const group = el("span");
+  caps.forEach((c) => group.append(el("kbd", "", c)));
+  group.append(el("span", "", label));
+  return group;
+}
+
+function saveEditor() {
+  const text = editor.textInput ? editor.textInput.value.trim() : editor.text;
+  if (!text) return editor.textInput.focus();
+  const keywords = [...new Set(words(editor.keywordsInput.value))];
+  const adding = editor.isNew;
+  const isNew = adding && !data.custom.includes(text) && !kaomojiInfo.has(text);
+  if (isNew) data.custom.push(text);
+  if (keywords.length) data.tags[text] = keywords;
+  else delete data.tags[text];
+  closeEditor();
+  saveData();
+
+  // Show where it went: in the results if there's a search (which now finds
+  // it), otherwise in Custom.
+  if (isNew && !searchEl.value.trim()) setCategory("custom");
+  else render({ keepSelection: true });
+  const index = flat.findIndex((t) => t.dataset.text === text);
+  if (index >= 0) select(index);
+  const home = kaomojiInfo.get(text)?.categories[0] ?? "Custom";
+  flashContext(isNew ? "Added to Custom" : adding ? `Already in ${home} · keywords saved` : "Keywords saved");
+}
+
+function closeEditor() {
+  if (!editor) return;
+  editor = null;
+  editorEl.hidden = true;
+  searchEl.focus();
+}
+
+editorEl.addEventListener("mousedown", (e) => {
+  if (e.target === editorEl) closeEditor();
+});
 
 // ---------- selection ----------
 
@@ -812,6 +882,7 @@ async function useKaomoji(text, tile, mode) {
   try {
     if (mode === "paste") {
       await invoke("paste_kaomoji", { text });
+      showHud("Pasted", text);
       return;
     }
     await window.__TAURI__.clipboardManager.writeText(text);
@@ -824,11 +895,14 @@ async function useKaomoji(text, tile, mode) {
   if (!data.prefs.stayOpen) {
     setTimeout(() => {
       hideWindow();
-      // The board is gone, so confirm the copy with a little HUD instead.
-      // Pasting needs none: the kaomoji shows up where you're typing.
-      invoke("show_hud", { text, dark: isDark() }).catch(() => {});
+      showHud("Copied", text);
     }, 90);
   } else if (pendingCelebration) setTimeout(celebrate, 700);
+}
+
+// The board is gone by now, so a little pill above the taskbar confirms it.
+function showHud(label, text) {
+  invoke("show_hud", { label, text, dark: isDark() }).catch(() => {});
 }
 
 function isDark() {
@@ -1050,7 +1124,7 @@ function closePopover() {
 
 function openActions(place = "actions") {
   const tile = flat[selected];
-  const addCustom = { label: "Add Custom Kaomoji…", icon: "ui:add", run: startAddingCustom };
+  const addCustom = { label: "Add Custom Kaomoji…", icon: "ui:add", run: () => openEditor() };
   if (!tile) {
     openPopover("actions", [addCustom], place);
     return;
@@ -1085,7 +1159,10 @@ function openActions(place = "actions") {
   if (tile.dataset.kind === "frequent") {
     items.push({ label: "Remove from Frequently Used", icon: "ui:forget", run: () => forgetUsage(text) });
   }
-  items.push({ label: "Quick Look", icon: "ui:preview", keys: ["Ctrl", "Y"], run: openPreview });
+  items.push(
+    { label: "Edit Keywords…", icon: "ui:keywords", keys: ["Ctrl", "E"], run: () => editKeywords(text) },
+    { label: "Quick Look", icon: "ui:preview", keys: ["Ctrl", "Y"], run: openPreview }
+  );
   items.push("sep", addCustom, { label: "Your Stats…", icon: "ui:stats", run: openStats });
   if (tile.dataset.kind === "custom") {
     items.push({ label: "Delete", icon: "ui:delete", danger: true, run: () => deleteCustom(text) });
@@ -1143,7 +1220,7 @@ function renderPreview() {
   if (!tile) return closePreview();
   const text = tile.dataset.text;
   const info = kaomojiInfo.get(text);
-  const card = el("div", "preview-card");
+  const card = el("div", "overlay-card");
   card.append(el("div", "preview-text kaomoji-font", text));
 
   const meta = el("div", "preview-meta");
@@ -1158,22 +1235,23 @@ function renderPreview() {
   }
   card.append(meta);
 
-  if (info?.keywords.size) {
+  // Your own keywords first, highlighted.
+  const yours = data.tags[text] || [];
+  const builtIn = [...(info?.keywords ?? [])].filter((kw) => !yours.includes(kw));
+  if (yours.length || builtIn.length) {
     const chips = el("div", "preview-chips");
-    info.keywords.forEach((kw) => chips.append(el("span", "chip", kw)));
+    yours.forEach((kw) => chips.append(el("span", "chip yours", kw)));
+    builtIn.forEach((kw) => chips.append(el("span", "chip", kw)));
     card.append(chips);
   }
 
-  const hint = el("div", "preview-hint");
-  const keys = (label, ...caps) => {
-    const group = el("span");
-    caps.forEach((c) => group.append(el("kbd", "", c)));
-    group.append(el("span", "", label));
-    hint.append(group);
-  };
-  keys("Browse", "←", "→");
-  keys(primaryLabel.textContent, "↵");
-  keys("Close", "Esc");
+  const hint = el("div", "overlay-hint");
+  hint.append(
+    hintKeys("Browse", "←", "→"),
+    hintKeys(primaryLabel.textContent, "↵"),
+    hintKeys("Keywords", "Ctrl", "E"),
+    hintKeys("Close", "Esc")
+  );
   card.append(hint);
   previewEl.replaceChildren(card);
 }
@@ -1190,6 +1268,11 @@ function handlePreviewKey(e, ctrl, key) {
     closePreview();
     ctrl ? runSecondary(selected) : runPrimary(selected);
   } else if (ctrl && key === "d" && tile) toggleFavorite(tile.dataset.text);
+  else if (ctrl && key === "e" && tile) editKeywords(tile.dataset.text);
+}
+
+function editKeywords(text) {
+  openEditor({ text, existing: true });
 }
 
 previewEl.addEventListener("mousedown", (e) => {
@@ -1219,8 +1302,20 @@ document.addEventListener("keydown", (e) => {
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.toLowerCase();
 
+  // The editor's own fields handle their keys; this is for clicks elsewhere
+  // in the dialog.
+  if (editor) {
+    if (e.key === "Escape") closeEditor();
+    return;
+  }
   if (previewOpen) {
     handlePreviewKey(e, ctrl, key);
+    return;
+  }
+  if (ctrl && key === "e") {
+    e.preventDefault();
+    const tile = flat[selected];
+    if (tile) editKeywords(tile.dataset.text);
     return;
   }
   // Space only while the search is empty, so it can still separate words.
@@ -1783,7 +1878,7 @@ function onHidden() {
   closePopover();
   closePreview();
   if (pendingUndo) clearUndo();
-  addingCustom = false;
+  closeEditor();
   searchEl.value = "";
   setCategory("all");
 }
