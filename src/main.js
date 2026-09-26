@@ -112,7 +112,8 @@ function dayKey(time = Date.now()) {
 }
 
 // Called at startup and every time the window opens, so edits made on
-// another computer (via a synced folder) show up on the next peek.
+// another computer (via a synced folder) show up on the next peek. Returns
+// whether the data differs from what's already on screen.
 async function loadData({ initial = false } = {}) {
   let stored;
   try {
@@ -121,8 +122,9 @@ async function loadData({ initial = false } = {}) {
     // Leave the file alone; running on what we have beats clobbering it.
     console.error("couldn't load data.json", err);
     flashContext(String(err), 4000);
-    return;
+    return false;
   }
+  const before = dataLoaded ? JSON.stringify(data) : null;
   if (stored) {
     data = normalize(stored);
   } else if (initial) {
@@ -131,6 +133,7 @@ async function loadData({ initial = false } = {}) {
   dataLoaded = true;
   // No file yet (first run, or it was deleted): write out what we have.
   if (!stored) saveData();
+  return JSON.stringify(data) !== before;
 }
 
 function saveData() {
@@ -355,12 +358,7 @@ function render({ keepSelection = false } = {}) {
     contentEl.append(wrap);
   }
 
-  // Long kaomoji get two cells, and the few that still don't fit get the
-  // whole row. Read all widths before writing so each pass lays out once.
-  const overflows = (tile) => tile.scrollWidth > tile.clientWidth;
-  const wide = flat.filter(overflows);
-  wide.forEach((tile) => tile.classList.add("wide"));
-  wide.filter(overflows).forEach((tile) => tile.classList.add("full"));
+  applySpans();
 
   flat.slice(0, 9).forEach((tile, i) => (tile.dataset.n = String(i + 1)));
 
@@ -376,6 +374,37 @@ function render({ keepSelection = false } = {}) {
   select(next, false);
 
   if (!faceTimer) faceEl.textContent = query && !flat.length ? FACE_SAD : FACE_IDLE;
+}
+
+// Long kaomoji get two cells, and the few that still don't fit get the whole
+// row. Whether one fits depends only on its text and the tile size, so each
+// is measured once per density and remembered. Measuring forces layout and
+// was most of the cost of a render.
+const spanCache = new Map(); // "density|text" -> "normal" | "wide" | "full"
+
+function applySpans() {
+  const density = data.prefs.density;
+  const unknown = [];
+  for (const tile of flat) {
+    const span = spanCache.get(`${density}|${tile.dataset.text}`);
+    if (span === undefined) unknown.push(tile);
+    else if (span !== "normal") tile.classList.add("wide", ...(span === "full" ? ["full"] : []));
+  }
+  // Nothing to measure against while the page has no width; don't cache junk.
+  if (!unknown.length || !contentEl.clientWidth) return;
+
+  // Read all widths before writing so each pass lays out once.
+  const overflows = (tile) => tile.scrollWidth > tile.clientWidth;
+  const wide = unknown.filter(overflows);
+  wide.forEach((tile) => tile.classList.add("wide"));
+  const full = new Set(wide.filter(overflows));
+  full.forEach((tile) => tile.classList.add("full"));
+
+  const wideSet = new Set(wide);
+  for (const tile of unknown) {
+    const span = full.has(tile) ? "full" : wideSet.has(tile) ? "wide" : "normal";
+    spanCache.set(`${density}|${tile.dataset.text}`, span);
+  }
 }
 
 function buildTile(text, sec, indexInSection, favorites) {
@@ -1336,22 +1365,32 @@ async function handleHotkeyRecording(e) {
 
 // ---------- window lifecycle ----------
 
-async function onShown() {
+// The board resets as it hides, so it's already showing the fresh default
+// view the next time it opens, rather than flashing the old search and then
+// redrawing.
+function onHidden() {
   if (!settingsPanel.hidden) closeSettings();
   statsPanel.hidden = true;
   closePopover();
   if (pendingUndo) clearUndo();
   addingCustom = false;
   searchEl.value = "";
-  setTimeout(() => searchEl.focus(), 0);
-  await loadData();
-  applyPrefs();
   setCategory("all");
+}
+
+async function onShown() {
+  setTimeout(() => searchEl.focus(), 0);
+  // Only redraw if the data changed while hidden (e.g. from a synced folder).
+  if (await loadData()) {
+    applyPrefs();
+    render();
+  }
   if (Date.now() - lastUpdateCheck > UPDATE_CHECK_INTERVAL_MS) checkForUpdate();
 }
 
 (async () => {
   window.__TAURI__.event.listen("shown", onShown);
+  window.__TAURI__.event.listen("hidden", onHidden);
   await loadData({ initial: true });
   applyPrefs();
   setCategory("all");

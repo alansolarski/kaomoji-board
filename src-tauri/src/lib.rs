@@ -16,7 +16,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 struct HotkeyConfig {
     ctrl: bool,
     alt: bool,
@@ -39,7 +39,7 @@ impl Default for HotkeyConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 struct AppConfig {
     hotkey: HotkeyConfig,
     window_x: Option<i32>,
@@ -52,6 +52,10 @@ struct AppConfig {
 }
 
 struct HotkeyState(Mutex<Shortcut>);
+
+/// config.json, read once at startup and kept in memory; see load_config
+/// and update_config.
+struct ConfigState(Mutex<AppConfig>);
 
 const TRAY_ID: &str = "main";
 const AUTOSTART_FLAG: &str = "--autostart";
@@ -71,18 +75,32 @@ fn config_path(app: &tauri::AppHandle) -> std::path::PathBuf {
     app_data_file(app, "config.json")
 }
 
-fn load_config(app: &tauri::AppHandle) -> AppConfig {
-    let path = config_path(app);
-    std::fs::read_to_string(path)
+fn read_config_file(app: &tauri::AppHandle) -> AppConfig {
+    std::fs::read_to_string(config_path(app))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-fn save_config(app: &tauri::AppHandle, cfg: &AppConfig) {
-    let path = config_path(app);
-    if let Ok(s) = serde_json::to_string_pretty(cfg) {
-        let _ = std::fs::write(path, s);
+/// Current config, from memory. Showing and hiding the board read this, so
+/// it shouldn't touch the disk.
+fn load_config(app: &tauri::AppHandle) -> AppConfig {
+    let state = app.state::<ConfigState>();
+    let cfg = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    cfg.clone()
+}
+
+/// Applies a change and writes config.json only if something actually
+/// changed (most hides leave the window where it was).
+fn update_config(app: &tauri::AppHandle, change: impl FnOnce(&mut AppConfig)) {
+    let state = app.state::<ConfigState>();
+    let mut cfg = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    let before = cfg.clone();
+    change(&mut cfg);
+    if *cfg != before {
+        if let Ok(s) = serde_json::to_string_pretty(&*cfg) {
+            let _ = std::fs::write(config_path(app), s);
+        }
     }
 }
 
@@ -159,18 +177,19 @@ fn toggle_window(window: &WebviewWindow) {
 
 fn hide_and_save(window: &WebviewWindow) {
     if let Ok(pos) = window.outer_position() {
-        let app = window.app_handle();
-        let mut cfg = load_config(app);
-        cfg.window_x = Some(pos.x);
-        cfg.window_y = Some(pos.y);
-        if let Ok(Some(monitor)) = window.current_monitor() {
-            let mp = monitor.position();
-            cfg.monitor_x = Some(mp.x);
-            cfg.monitor_y = Some(mp.y);
-        }
-        save_config(app, &cfg);
+        let monitor = window.current_monitor().ok().flatten().map(|m| *m.position());
+        update_config(window.app_handle(), |cfg| {
+            cfg.window_x = Some(pos.x);
+            cfg.window_y = Some(pos.y);
+            if let Some(mp) = monitor {
+                cfg.monitor_x = Some(mp.x);
+                cfg.monitor_y = Some(mp.y);
+            }
+        });
     }
     let _ = window.hide();
+    // Lets the frontend reset to the default view while nobody's looking.
+    let _ = window.emit("hidden", ());
 }
 
 #[tauri::command]
@@ -316,9 +335,7 @@ fn set_data_dir(app: tauri::AppHandle, dir: Option<String>) -> Result<Option<ser
         None => app_data_file(&app, DATA_FILE),
     };
     let existing = read_data_file(&target)?;
-    let mut cfg = load_config(&app);
-    cfg.data_dir = dir;
-    save_config(&app, &cfg);
+    update_config(&app, move |cfg| cfg.data_dir = dir);
     Ok(existing)
 }
 
@@ -390,9 +407,7 @@ fn set_hotkey(
     drop(current);
 
     update_tray_tooltip(&app, &hotkey.label);
-    let mut cfg = load_config(&app);
-    cfg.hotkey = hotkey;
-    save_config(&app, &cfg);
+    update_config(&app, move |cfg| cfg.hotkey = hotkey);
 
     Ok(())
 }
@@ -446,6 +461,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle();
+            app.manage(ConfigState(Mutex::new(read_config_file(handle))));
             let cfg = load_config(handle);
 
             let initial_shortcut = build_shortcut(&cfg.hotkey).unwrap_or_else(|_| {
