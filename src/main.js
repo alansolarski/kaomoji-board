@@ -1047,9 +1047,21 @@ function renderStats() {
     return;
   }
 
+  // Same card language as Settings: titled groups of rounded cards.
+  const group = (title) => {
+    if (title) statsBody.append(el("div", "settings-group-title", title));
+    const card = el("div", "settings-card");
+    statsBody.append(card);
+    return card;
+  };
+
   const hero = el("div", "stats-hero");
-  hero.append(el("span", "big", total.toLocaleString()), el("span", "sub", `kaomoji copied since ${formatDate(since)}`));
-  statsBody.append(hero);
+  hero.append(
+    el("span", "big", total.toLocaleString()),
+    el("span", "sub", `kaomoji copied since ${formatDate(since)}`),
+    el("span", "face", "(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧")
+  );
+  group("Overview").append(hero);
 
   const { current, longest, activeDays } = streaks(days);
   const cards = el("div", "stat-cards");
@@ -1064,7 +1076,7 @@ function renderStats() {
   }
   statsBody.append(cards);
 
-  statsBody.append(el("div", "stats-section-title", "Most used"));
+  const topCard = group("Most used");
   const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const maxCount = top[0][1];
   top.forEach(([text, count], i) => {
@@ -1076,7 +1088,7 @@ function renderStats() {
     bar.append(fill);
     row.append(el("span", "top-rank", String(i + 1)), el("span", "top-kaomoji kaomoji-font", text), bar, el("span", "top-count", `×${count}`));
     row.addEventListener("click", () => useKaomoji(text, null, data.prefs.autoPaste ? "paste" : "copy"));
-    statsBody.append(row);
+    topCard.append(row);
   });
 
   const lines = [];
@@ -1094,11 +1106,12 @@ function renderStats() {
   }
   if (first) lines.push(["First kaomoji", `${first.text}  ·  ${formatDate(first.t)}`]);
 
-  statsBody.append(el("div", "stats-section-title", "Fun facts"));
+  if (!lines.length) return;
+  const factsCard = group("Fun facts");
   for (const [label, value] of lines) {
-    const line = el("div", "stat-line");
+    const line = el("div", "setting-row stat-line");
     line.append(el("span", "", label), el("span", "value kaomoji-font", value));
-    statsBody.append(line);
+    factsCard.append(line);
   }
 }
 
