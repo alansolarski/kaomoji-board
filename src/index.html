@@ -17,7 +17,7 @@
           spellcheck="false"
         />
         <button class="dropdown-btn" id="categoryBtn" title="Filter by category (Ctrl+P)">
-          <span class="dot" id="categoryDot"></span>
+          <span class="cat-icon-slot" id="categoryIcon"></span>
           <span id="categoryLabel">All Categories</span>
           <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M4.5 6.5 8 10l3.5-3.5" />
@@ -82,85 +82,118 @@
         </header>
 
         <div class="settings-body">
-          <label class="setting-row">
-            <span class="setting-text">
-              <span>Stay open after copying</span>
-            </span>
-            <span class="toggle">
-              <input type="checkbox" id="stayOpenToggle" />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </span>
-          </label>
+          <div class="settings-group-title">General</div>
+          <div class="settings-card">
+            <label class="setting-row">
+              <span class="setting-text"><span>Launch at startup</span></span>
+              <span class="toggle">
+                <input type="checkbox" id="autostartToggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </span>
+            </label>
 
-          <label class="setting-row">
-            <span class="setting-text">
-              <span>Paste into the last app</span>
-              <span class="setting-hint">Enter pastes directly and restores your clipboard. Ctrl+Enter still just copies.</span>
-            </span>
-            <span class="toggle">
-              <input type="checkbox" id="autoPasteToggle" />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </span>
-          </label>
-
-          <label class="setting-row">
-            <span class="setting-text"><span>Copy sound</span></span>
-            <span class="toggle">
-              <input type="checkbox" id="soundToggle" />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </span>
-          </label>
-
-          <label class="setting-row">
-            <span class="setting-text"><span>Launch at startup</span></span>
-            <span class="toggle">
-              <input type="checkbox" id="autostartToggle" />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </span>
-          </label>
-
-          <div class="setting-row">
-            <span class="setting-text"><span>Tile size</span></span>
-            <div class="segmented" id="densitySegmented">
-              <button data-density="comfortable" class="seg-btn">Comfortable</button>
-              <button data-density="compact" class="seg-btn">Compact</button>
+            <div class="setting-row">
+              <span class="setting-text">
+                <span>Global hotkey</span>
+                <span class="setting-hint" id="hotkeyHint"></span>
+              </span>
+              <span class="row-buttons">
+                <button class="hotkey-btn" id="hotkeyBtn" title="Click, then press a new shortcut">…</button>
+                <button class="icon-btn reset-btn" id="hotkeyResetBtn" title="Reset to Ctrl+Alt+K" aria-label="Reset hotkey" hidden>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                  </svg>
+                </button>
+              </span>
             </div>
           </div>
 
-          <div class="setting-row">
-            <span class="setting-text"><span>Theme</span></span>
-            <div class="segmented" id="themeSegmented">
-              <button data-theme="auto" class="seg-btn">Auto</button>
-              <button data-theme="light" class="seg-btn">Light</button>
-              <button data-theme="dark" class="seg-btn">Dark</button>
+          <div class="settings-group-title">Copying</div>
+          <div class="settings-card">
+            <label class="setting-row">
+              <span class="setting-text">
+                <span>Stay open after copying</span>
+                <span class="setting-hint">Keep the board up so you can grab several in a row</span>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="stayOpenToggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </span>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-text">
+                <span>Paste into the last app</span>
+                <span class="setting-hint">Enter pastes directly and restores your clipboard. Ctrl+Enter still just copies.</span>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="autoPasteToggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </span>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-text"><span>Copy sound</span></span>
+              <span class="toggle">
+                <input type="checkbox" id="soundToggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="settings-group-title">Appearance</div>
+          <div class="settings-card">
+            <div class="setting-row">
+              <span class="setting-text"><span>Theme</span></span>
+              <div class="segmented" id="themeSegmented">
+                <button data-theme="auto" class="seg-btn">Auto</button>
+                <button data-theme="light" class="seg-btn">Light</button>
+                <button data-theme="dark" class="seg-btn">Dark</button>
+              </div>
+            </div>
+
+            <div class="setting-row setting-row-tall">
+              <span class="setting-text">
+                <span>Tile size</span>
+                <span class="setting-hint">How many kaomoji fit on screen</span>
+              </span>
+              <div class="density-options" id="densitySegmented">
+                <button class="density-option" data-density="comfortable">
+                  <span class="density-preview cols-4"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                  <span class="density-label">Comfortable</span>
+                </button>
+                <button class="density-option" data-density="compact">
+                  <span class="density-preview cols-5"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                  <span class="density-label">Compact</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          <div class="setting-row">
-            <span class="setting-text">
-              <span>Sync folder</span>
-              <span class="setting-hint path" id="dataDirHint"></span>
-            </span>
-            <span class="row-buttons">
-              <button class="small-btn" id="dataDirResetBtn" hidden>Use this PC</button>
-              <button class="small-btn" id="dataDirBtn">Choose…</button>
-            </span>
+          <div class="settings-group-title">Sync</div>
+          <div class="settings-card">
+            <div class="setting-row">
+              <span class="setting-text">
+                <span>Sync folder</span>
+                <span class="setting-hint path" id="dataDirHint"></span>
+              </span>
+              <span class="row-buttons">
+                <button class="small-btn" id="dataDirResetBtn" hidden>Use this PC</button>
+                <button class="small-btn" id="dataDirBtn">Choose…</button>
+              </span>
+            </div>
           </div>
 
-          <div class="setting-row">
-            <span class="setting-text">
-              <span id="versionLabel">Version</span>
-              <span class="setting-hint" id="updateHint"></span>
-            </span>
-            <button class="small-btn" id="updateBtn">Check for updates</button>
-          </div>
-
-          <div class="setting-row">
-            <span class="setting-text">
-              <span>Global hotkey</span>
-              <span class="setting-hint" id="hotkeyHint"></span>
-            </span>
-            <button class="hotkey-btn" id="hotkeyBtn">…</button>
+          <div class="settings-group-title">About</div>
+          <div class="settings-card">
+            <div class="setting-row">
+              <span class="setting-text">
+                <span id="versionLabel">Version</span>
+                <span class="setting-hint" id="updateHint"></span>
+              </span>
+              <button class="small-btn" id="updateBtn">Check for updates</button>
+            </div>
           </div>
         </div>
       </div>

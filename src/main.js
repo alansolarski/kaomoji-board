@@ -1,4 +1,5 @@
 import { categories as rawCategories } from "./kaomoji-data.js";
+import { categoryIcon } from "./icons.js";
 
 const $ = (id) => document.getElementById(id);
 const appEl = $("app");
@@ -8,7 +9,7 @@ const faceEl = $("face");
 const contextEl = $("context");
 const categoryBtn = $("categoryBtn");
 const categoryLabel = $("categoryLabel");
-const categoryDot = $("categoryDot");
+const categoryIconSlot = $("categoryIcon");
 const primaryBtn = $("primaryBtn");
 const primaryLabel = $("primaryLabel");
 const actionsBtn = $("actionsBtn");
@@ -37,7 +38,6 @@ const FACE_IDLE = "( ˘ω˘ )";
 const FACE_HAPPY = "(ﾉ◕ヮ◕)ﾉ";
 const FACE_SAD = "(｡•́︿•̀｡)";
 
-const PALETTE = [1, 2, 3, 4, 5, 6].map((n) => `var(--palette-${n})`);
 
 const HEART_SVG =
   '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">' +
@@ -289,13 +289,13 @@ function allSections() {
   const sections = [];
   const frequent = frequentItems();
   if (frequent.length) {
-    sections.push({ id: "frequent", label: "Frequently Used", color: "var(--accent)", items: frequent, kind: "frequent" });
+    sections.push({ id: "frequent", label: "Frequently Used", icon: "frequent", items: frequent, kind: "frequent" });
   }
-  sections.push({ id: "favorites", label: "Favorites", color: "var(--accent)", items: data.favorites, kind: "favorites" });
+  sections.push({ id: "favorites", label: "Favorites", icon: "favorites", items: data.favorites, kind: "favorites" });
   categories.forEach((cat, i) => {
-    sections.push({ id: `cat-${i}`, label: cat.name, color: PALETTE[i % PALETTE.length], items: cat.items, kind: "category" });
+    sections.push({ id: `cat-${i}`, label: cat.name, icon: cat.name, items: cat.items, kind: "category" });
   });
-  sections.push({ id: "custom", label: "Custom", color: "var(--palette-6)", items: data.custom, kind: "custom" });
+  sections.push({ id: "custom", label: "Custom", icon: "custom", items: data.custom, kind: "custom" });
   return sections;
 }
 
@@ -306,7 +306,7 @@ function visibleSections(query) {
   if (query) {
     const items = search(query, filtered ? new Set(filtered.items) : null);
     const label = filtered ? `Results in ${filtered.label}` : "Results";
-    return [{ id: "results", label, color: "var(--accent)", items, kind: "results" }];
+    return [{ id: "results", label, items, kind: "results" }];
   }
   if (filtered) return [filtered];
   // In the combined view, an empty favorites section is just noise.
@@ -318,8 +318,7 @@ function setCategory(id) {
   categoryFilter = id;
   const section = allSections().find((s) => s.id === id);
   categoryLabel.textContent = section ? section.label : "All Categories";
-  categoryDot.style.setProperty("--dot-color", section ? section.color : "var(--ink-soft)");
-  categoryDot.hidden = !section;
+  categoryIconSlot.replaceChildren(categoryIcon(section ? section.icon : "all"));
   contentEl.scrollTop = 0;
   render();
 }
@@ -766,11 +765,7 @@ function openPopover(kind, items, place) {
       continue;
     }
     const btn = el("button", "popover-item" + (item.danger ? " danger" : ""));
-    if (item.dot) {
-      const dot = el("span", "dot");
-      dot.style.setProperty("--dot-color", item.dot);
-      btn.append(dot);
-    }
+    if (item.icon) btn.append(categoryIcon(item.icon));
     btn.append(el("span", "label", item.label));
     if (item.checked) btn.append(el("span", "check", "✓"));
     if (item.keys) {
@@ -862,11 +857,11 @@ function openActions(place = "actions") {
 
 function openCategories() {
   const items = [
-    { label: "All Categories", checked: categoryFilter === "all", run: () => setCategory("all") },
+    { label: "All Categories", icon: "all", checked: categoryFilter === "all", run: () => setCategory("all") },
     "sep",
     ...allSections().map((s) => ({
       label: s.label,
-      dot: s.color,
+      icon: s.icon,
       checked: categoryFilter === s.id,
       run: () => setCategory(s.id),
     })),
@@ -1151,7 +1146,7 @@ function applyPrefs() {
 }
 
 densitySegmented.addEventListener("click", (e) => {
-  const btn = e.target.closest(".seg-btn");
+  const btn = e.target.closest("[data-density]");
   if (!btn) return;
   data.prefs.density = btn.dataset.density;
   applyDensity(data.prefs.density);
@@ -1193,10 +1188,29 @@ function closeSettings() {
 settingsBtn.addEventListener("click", openSettings);
 settingsBackBtn.addEventListener("click", closeSettings);
 
+const DEFAULT_HOTKEY = { ctrl: true, alt: true, shift: false, meta: false, code: "KeyK", label: "Ctrl+Alt+K" };
+const hotkeyResetBtn = $("hotkeyResetBtn");
+
+// "Ctrl+Alt+K" -> Ctrl Alt K as keycaps.
+function renderHotkeyKeys(label) {
+  hotkeyBtn.replaceChildren(...label.split("+").map((key) => el("kbd", "", key)));
+}
+
 function showHotkeyLabel(label) {
   hotkeyLabel = label;
-  hotkeyBtn.textContent = label;
+  renderHotkeyKeys(label);
+  hotkeyResetBtn.hidden = label === DEFAULT_HOTKEY.label;
 }
+
+hotkeyResetBtn.addEventListener("click", async () => {
+  try {
+    await invoke("set_hotkey", { hotkey: DEFAULT_HOTKEY });
+    showHotkeyLabel(DEFAULT_HOTKEY.label);
+    hotkeyHint.textContent = "";
+  } catch (err) {
+    hotkeyHint.textContent = String(err);
+  }
+});
 
 async function loadBackendSettings() {
   try {
@@ -1322,7 +1336,7 @@ hotkeyBtn.addEventListener("click", () => {
 function cancelHotkeyRecording() {
   recordingHotkey = false;
   hotkeyBtn.classList.remove("recording");
-  hotkeyBtn.textContent = hotkeyLabel;
+  renderHotkeyKeys(hotkeyLabel);
   hotkeyHint.textContent = "";
   invoke("resume_hotkey").catch(() => {});
 }
@@ -1358,7 +1372,7 @@ async function handleHotkeyRecording(e) {
     setTimeout(() => (hotkeyHint.textContent = ""), 1500);
   } catch (err) {
     // The backend has already put the previous hotkey back.
-    hotkeyBtn.textContent = hotkeyLabel;
+    renderHotkeyKeys(hotkeyLabel);
     hotkeyHint.textContent = String(err);
   }
 }
