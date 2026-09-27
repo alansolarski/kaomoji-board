@@ -880,6 +880,15 @@ kbd {
 .popover-item .keys {
   display: flex;
   gap: 3px;
+  margin-left: 10px;
+}
+
+/* The Actions menu grows to fit its longest item instead of cutting it off.
+   The category list stays fixed, so filtering it doesn't make it jump. */
+.popover[data-kind="actions"] {
+  width: max-content;
+  min-width: 240px;
+  max-width: 360px;
 }
 
 .popover-item.active {

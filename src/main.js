@@ -1040,6 +1040,7 @@ function openPopover(kind, items, place, { searchable = false } = {}) {
   popoverKind = kind;
   popoverEl.innerHTML = "";
   popoverEl.dataset.place = typeof place === "string" ? place : "cursor";
+  popoverEl.dataset.kind = kind;
 
   let searchInput = null;
   if (searchable) {
