@@ -860,9 +860,12 @@ function playCopySound() {
   }
 }
 
-function runPrimary(index) {
+// `flipMarkdown` does the opposite of the Markdown-safe setting just this
+// once (Ctrl+Shift+Enter), e.g. for a Discord message drafted in Notepad.
+function runPrimary(index, { flipMarkdown = false } = {}) {
   const tile = flat[index];
-  if (tile) useKaomoji(tile.dataset.text, tile, data.prefs.autoPaste ? "paste" : "copy");
+  const escape = flipMarkdown ? !shouldEscape() : shouldEscape();
+  if (tile) useKaomoji(tile.dataset.text, tile, data.prefs.autoPaste ? "paste" : "copy", escape);
 }
 
 function runSecondary(index) {
@@ -870,7 +873,7 @@ function runSecondary(index) {
   if (tile) useKaomoji(tile.dataset.text, tile, data.prefs.autoPaste ? "copy" : "paste");
 }
 
-async function useKaomoji(text, tile, mode) {
+async function useKaomoji(text, tile, mode, escape = shouldEscape()) {
   closePopover();
   // Deliberately no re-render: reshuffling "Frequently Used" under the
   // cursor is jarring. The next time the window opens picks it up.
@@ -887,8 +890,7 @@ async function useKaomoji(text, tile, mode) {
     faceEl.textContent = idleFace();
   }, 900);
 
-  const md = data.prefs.markdown;
-  const output = md === "always" || (md === "chat" && fromMarkdownApp) ? escapeMarkdown(text) : text;
+  const output = escape ? escapeMarkdown(text) : text;
   try {
     if (mode === "paste") {
       await invoke("paste_kaomoji", { text: output });
@@ -913,6 +915,12 @@ async function useKaomoji(text, tile, mode) {
 // Set by the backend each time the board opens: whether the app it was
 // opened from is a chat app that reads Markdown (Discord, Slack, …).
 let fromMarkdownApp = false;
+
+// Whether the Markdown-safe setting applies to this copy or paste.
+function shouldEscape() {
+  const md = data.prefs.markdown;
+  return md === "always" || (md === "chat" && fromMarkdownApp);
+}
 
 // Discord (like most chat apps) reads * _ ~ ` | \ as Markdown, which eats
 // arms (¯\_(ツ)_/¯) and italicizes whatever sits between two (*^▽^*). A
@@ -1155,12 +1163,21 @@ function openActions(place = "actions") {
   const paste = { label: "Paste into Last App", icon: "ui:paste", run: () => useKaomoji(text, tile, "paste") };
   const copy = { label: "Copy to Clipboard", icon: "ui:copy", run: () => useKaomoji(text, tile, "copy") };
   const [primary, secondary] = data.prefs.autoPaste ? [paste, copy] : [copy, paste];
+  // The one-off opposite of what Enter would do about Markdown.
+  const escaping = shouldEscape();
+  const flipped = {
+    label: `${data.prefs.autoPaste ? "Paste" : "Copy"} ${escaping ? "as Plain Text" : "Markdown-safe"}`,
+    icon: "ui:markdown",
+    keys: ["Ctrl", "Shift", "↵"],
+    run: () => useKaomoji(text, tile, data.prefs.autoPaste ? "paste" : "copy", !escaping),
+  };
   const isFav = data.favorites.includes(text);
 
   const items = [
     { title: text },
     { ...primary, keys: ["↵"] },
     { ...secondary, keys: ["Ctrl", "↵"] },
+    flipped,
     "sep",
     {
       label: isFav ? "Remove from Favorites" : "Add to Favorites",
@@ -1288,7 +1305,9 @@ function handlePreviewKey(e, ctrl, key) {
   else if (e.key === "ArrowDown") moveVertical(1);
   else if (e.key === "Enter") {
     closePreview();
-    ctrl ? runSecondary(selected) : runPrimary(selected);
+    if (ctrl && e.shiftKey) runPrimary(selected, { flipMarkdown: true });
+    else if (ctrl) runSecondary(selected);
+    else runPrimary(selected);
   } else if (ctrl && key === "d" && tile) toggleFavorite(tile.dataset.text);
   else if (ctrl && key === "e" && tile) editKeywords(tile.dataset.text);
 }
@@ -1368,6 +1387,11 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
+  if (ctrl && e.shiftKey && e.key === "Enter") {
+    e.preventDefault();
+    runPrimary(selected, { flipMarkdown: true });
+    return;
+  }
   if (ctrl && e.key === "Enter") {
     e.preventDefault();
     runSecondary(selected);

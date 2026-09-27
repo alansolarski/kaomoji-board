@@ -29,6 +29,7 @@ const MAPPING = {
   "ui:move-right": "arrow-right",
   "ui:preview": "scan-eye",
   "ui:keywords": "tag",
+  "ui:markdown": "hash",
 
   all: "layout-grid",
   frequent: "clock",
